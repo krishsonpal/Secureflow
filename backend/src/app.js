@@ -11,12 +11,20 @@ const app = express()
 
 const redis = new Redis(process.env.REDIS_URL || undefined)
 
-app.use(cors({
-  origin: process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : [
-    "http://localhost:5173",
-    "http://localhost:4000"
-  ],
-  credentials: true
+app.use(cors((req, callback) => {
+  const isServiceRoute = req.originalUrl && req.originalUrl.startsWith('/api/v1/service');
+  
+  if (isServiceRoute) {
+    // Allow any origin for the service routes
+    callback(null, { origin: true });
+  } else {
+    // Restrict origins for dashboard/UI routes
+    const allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : [
+      "http://localhost:5173",
+      "http://localhost:4000"
+    ];
+    callback(null, { origin: allowedOrigins, credentials: true });
+  }
 }));
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
