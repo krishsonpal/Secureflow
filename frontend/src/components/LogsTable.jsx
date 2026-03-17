@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/card.jsx';
 import { ShieldAlert, CheckCircle2, AlertTriangle, Fingerprint, Ghost, Bug, UserX } from 'lucide-react';
 
 const LogsTable = ({ logs }) => {
