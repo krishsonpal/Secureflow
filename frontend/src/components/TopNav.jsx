@@ -1,8 +1,8 @@
-import React from 'react';
+
 import { Bell, Search, User, ChevronDown } from 'lucide-react';
 
 const TopNav = ({ connected, projectId, setProjectId, projects = [], onConnect }) => {
-  return (
+  return ( 
     <header className="flex h-16 items-center justify-between border-b border-gray-800 bg-gray-900/20 px-6 backdrop-blur-md">
       <div className="flex w-1/3 items-center">
         <div className="relative w-full max-w-sm">
