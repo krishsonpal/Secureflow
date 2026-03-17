@@ -11,37 +11,51 @@ const app = express()
 
 const redis = new Redis(process.env.REDIS_URL || undefined)
 
-app.use(cors((req, callback) => {
-  const isServiceRoute = req.originalUrl && req.originalUrl.startsWith('/api/v1/service');
-  
-  if (isServiceRoute) {
-    // Allow any origin for the service routes
-    callback(null, { origin: true });
-  } else {
-    // Restrict origins for dashboard/UI routes
-    const allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : [
-      "http://localhost:5173",
-      "http://localhost:4000"
-    ];
-    callback(null, { origin: allowedOrigins, credentials: true });
-  }
-}));
+
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 // app.use(express.static())
 app.use(cookieParser())
 
-app.use((err, req, res, next) => {
-    const statusCode = err.statuscode || 500;
-    const message = err.message || "Internal Server Error";
+app.use(cors((req, callback) => {
+  const isServiceRoute =
+    req.originalUrl && req.originalUrl.startsWith('/api/v1/service');
 
-    return res.status(statusCode).json({
-        success: false,
-        statuscode: statusCode,
-        message: message,
-        errors: err.errors || [],
-        data: null
+  if (isServiceRoute) {
+    // Public API (your SecureFlow middleware)
+    callback(null, {
+      origin: true
     });
+  } else {
+    // Dashboard routes (restricted)
+    const allowedOrigins = process.env.FRONTEND_URL
+      ? process.env.FRONTEND_URL.split(',')
+      : ["http://localhost:5173", "http://localhost:4000"];
+
+    const origin = req.headers.origin;
+
+    if (!origin || allowedOrigins.includes(origin) || origin.includes(".vercel.app")) {
+      callback(null, {
+        origin: true,
+        credentials: true
+      });
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  }
+}));
+
+app.use((err, req, res, next) => {
+  const statusCode = err.statuscode || 500;
+  const message = err.message || "Internal Server Error";
+
+  return res.status(statusCode).json({
+    success: false,
+    statuscode: statusCode,
+    message: message,
+    errors: err.errors || [],
+    data: null
+  });
 });
 
 
@@ -51,9 +65,9 @@ import apirouter from "./routes/apikey.routes.js"
 import servicerouter from "./routes/bonding.routes.js"
 
 app.use("/api/v1/users", userRouter)
-app.use("/api/v1/projects",projectRouter)
-app.use("/api/v1/apikey",apirouter)
-app.use("/api/v1/service",servicerouter)
+app.use("/api/v1/projects", projectRouter)
+app.use("/api/v1/apikey", apirouter)
+app.use("/api/v1/service", servicerouter)
 
 
-export { app ,redis }
+export { app, redis }
