@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "@fingerprintjs/fingerprintjs": "^5.1.0",
+    "axios": "^1.13.6",
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^17.2.3",
+    "emailjs-com": "^3.2.0",
+    "express": "^5.2.1",
+    "ioredis": "^5.9.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.1.5",
+    "nodemailer": "^8.0.2",
+    "socket.io": "^4.8.3"
+  },
+  "name": "secureflow",
+  "version": "1.0.0",
+  "description": "a plugin security service",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "author": "krish sonpal",
+  "license": "ISC"
+}
