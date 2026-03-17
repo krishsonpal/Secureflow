@@ -8,7 +8,7 @@ export const checkXSS = async (req, res, next) => {
         console.log(input)
 
         const response = await axios.post(
-            "http://localhost:8000/predict",
+            process.env.MICROSERVICE_URI,
             { content: input }
         );
 
