@@ -127,18 +127,27 @@ const loginUser = asyncHandler( async(req,res,next)  =>{
 })
 
 const logoutUser = asyncHandler( async(req,res,next)=>{
-    await User.findByIdAndUpdate(
-        req.user._id,
-        {
-            $unset:{
-                refreshToken:1
-            }
-
-        },
-        {
-            new : true
+    const accessToken = req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
+    
+    if(accessToken) {
+        try {
+            const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+            await User.findByIdAndUpdate(
+                decodedToken._id,
+                {
+                    $unset:{
+                        refreshToken:1
+                    }
+                },
+                {
+                    new : true
+                }
+            )
+        } catch(error) {
+            // Token might be expired, proceed to clear cookies
         }
-    )
+    }
+
     const options = {
         httpOnly : true,
         secure :  true,

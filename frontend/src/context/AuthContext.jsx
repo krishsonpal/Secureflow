@@ -11,6 +11,23 @@ export const AuthProvider = ({ children }) => {
   console.log("API URL:", import.meta.env.VITE_API_URL);
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
+  // Setup Axios interceptor to add Authorization header
+  useEffect(() => {
+    const requestInterceptor = axios.interceptors.request.use((config) => {
+      const token = localStorage.getItem('accessToken');
+      if (token && !config.headers.Authorization) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    }, (error) => {
+      return Promise.reject(error);
+    });
+
+    return () => {
+      axios.interceptors.request.eject(requestInterceptor);
+    };
+  }, []);
+
   // Check if we already have a user from localStorage
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -26,6 +43,13 @@ export const AuthProvider = ({ children }) => {
       if (response.data.success) {
         setUser(response.data.data.user);
         localStorage.setItem('user', JSON.stringify(response.data.data.user));
+        // Storing tokens for cross-site requests fallback
+        if (response.data.data.accessToken) {
+          localStorage.setItem('accessToken', response.data.data.accessToken);
+        }
+        if (response.data.data.refreshToken) {
+          localStorage.setItem('refreshToken', response.data.data.refreshToken);
+        }
         return { success: true };
       }
     } catch (error) {
@@ -47,10 +71,13 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       await axios.post(`${API_URL}/users/logout`, {}, { withCredentials: true });
-      setUser(null);
-      localStorage.removeItem('user');
     } catch (error) {
       console.error('Logout failed', error);
+    } finally {
+      setUser(null);
+      localStorage.removeItem('user');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
     }
   };
 
