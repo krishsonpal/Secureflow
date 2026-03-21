@@ -1,9 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, Shield, Activity, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Shield, Activity, Settings, LogOut, Book } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const Sidebar = () => {
   const { logout } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   
   return (
     <div className="flex h-screen w-64 flex-col bg-gray-900/40 border-r border-gray-800 backdrop-blur-md">
@@ -14,10 +17,11 @@ const Sidebar = () => {
         </span>
       </div>
       <nav className="flex-1 space-y-2 px-4 py-6">
-        <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active />
-        <NavItem icon={<Activity size={20} />} label="Live Traffic" />
-        <NavItem icon={<Shield size={20} />} label="Threat Analysis" />
-        <NavItem icon={<Settings size={20} />} label="Settings" />
+        <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={location.pathname === '/'} onClick={() => navigate('/')} />
+        <NavItem icon={<Book size={20} />} label="Documentation" active={location.pathname === '/docs'} onClick={() => navigate('/docs')} />
+        <NavItem icon={<Activity size={20} />} label="Live Traffic" onClick={() => {}} />
+        <NavItem icon={<Shield size={20} />} label="Threat Analysis" onClick={() => {}} />
+        <NavItem icon={<Settings size={20} />} label="Settings" onClick={() => {}} />
       </nav>
       <div className="p-4 border-t border-gray-800">
         <div onClick={logout}>
@@ -28,9 +32,10 @@ const Sidebar = () => {
   );
 };
 
-const NavItem = ({ icon, label, active }) => {
+const NavItem = ({ icon, label, active, onClick }) => {
   return (
     <div
+      onClick={onClick}
       className={`flex items-center cursor-pointer rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
         active
           ? 'bg-blue-500/10 text-blue-400'

@@ -11,7 +11,7 @@ export const AuthProvider = ({ children }) => {
   console.log("API URL:", import.meta.env.VITE_API_URL);
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
-  // Setup Axios interceptor to add Authorization header
+  // Setup Axios interceptors
   useEffect(() => {
     const requestInterceptor = axios.interceptors.request.use((config) => {
       const token = localStorage.getItem('accessToken');
@@ -23,10 +23,51 @@ export const AuthProvider = ({ children }) => {
       return Promise.reject(error);
     });
 
+    const responseInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const originalRequest = error.config;
+        if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url.includes('/refresh-token')) {
+          originalRequest._retry = true;
+          const refreshToken = localStorage.getItem('refreshToken');
+          
+          if (refreshToken) {
+            try {
+              const res = await axios.post(`${API_URL}/users/refresh-token`, { refreshToken }, { withCredentials: true });
+              if (res.data?.success || res.status === 200 || res.status === 201) {
+                const newAccessToken = res.data?.data?.accessToken;
+                if (newAccessToken) {
+                  localStorage.setItem('accessToken', newAccessToken);
+                  originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                  return axios(originalRequest);
+                }
+              }
+            } catch (err) {
+              // Refresh failed
+              localStorage.removeItem('user');
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('refreshToken');
+              setUser(null);
+              window.location.href = '/login';
+            }
+          } else {
+            // No refresh token available
+            localStorage.removeItem('user');
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            setUser(null);
+            window.location.href = '/login';
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
     return () => {
       axios.interceptors.request.eject(requestInterceptor);
+      axios.interceptors.response.eject(responseInterceptor);
     };
-  }, []);
+  }, [API_URL]);
 
   // Check if we already have a user from localStorage
   useEffect(() => {
