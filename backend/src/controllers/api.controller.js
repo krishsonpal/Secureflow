@@ -1,73 +1,53 @@
 import { APIResponse } from "../utils/apiresponse.js";
 import { APIError } from "../utils/apierror.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { User } from "../models/user.model.js";
-import crypto from 'crypto';
-import jwt from "jsonwebtoken"
 import { Project } from "../models/project.model.js";
 import { ApiKey } from "../models/apikey.model.js";
+import { generateApiKey } from "../utils/tokens.js";
 
 
-const createApiKey = (req,res,next)=>{
-    return crypto.randomBytes(32).toString('hex');
-}
-
-
+// Auth handled by verifyJWT (req.user). The stored `key` is a sha256 HASH; the
+// plaintext `sk_live_…` key is returned to the caller exactly once and never
+// persisted or shown again.
 const creatNewAPIKey = asyncHandler( async(req,res,next) =>{
-    const accessToken = req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
     const {projectId} = req.body
 
-        if(!accessToken){
-                throw new APIError(400,"AccessToken is missing")
-            }
-        
-            try{
-                const decodedToken = jwt.verify(
-                    accessToken,
-                    process.env.ACCESS_TOKEN_SECRET
-                )
-                const foundproject = await Project.findById(projectId)
+    if(!projectId){
+        throw new APIError(400,"projectId is required")
+    }
 
-                if(!foundproject)
-                {
-                    throw new APIError(401,"Project doesnot exists")
-                }
+    const foundproject = await Project.findById(projectId)
+    if(!foundproject)
+    {
+        throw new APIError(404,"Project does not exist")
+    }
 
-                if(foundproject.userId.toString() !== decodedToken?._id)
-                {
-                    throw new APIError(401,"Project userid doesnot match with the token userid")
-                }
-                
-                const hashCode=  createApiKey()
+    if(foundproject.userId.toString() !== req.user._id.toString())
+    {
+        throw new APIError(403,"You do not own this project")
+    }
 
-                if(!hashCode)
-                {
-                    throw new APIError(501,"An error occured while createing api key")
-                }
+    const { full, hash, prefix } = generateApiKey()
 
-                const apiKey= await ApiKey.create({
-                    key : hashCode,
-                    userId : foundproject.userId,
-                    projectId : foundproject._id,
-                    lastUsedAt : new Date()
-                })    
-    
-                const createdAPI = await ApiKey.findById(apiKey._id).select(
-                        "-userId"
-                    )
-                if(!createdAPI){
-                        throw new APIError(500, "Something went wrong will creating APIKey")
-                }
-                return res
-                .status(201)
-                .json(
-                    new APIResponse(201,createdAPI,"New APIKey Created Successfully")
-                )
-    
-            }
-            catch(error){
-            throw new APIError(401,error?.message || "Something went wrong")
-            }
+    const apiKey = await ApiKey.create({
+        key : hash,
+        keyPrefix : prefix,
+        userId : foundproject.userId,
+        organizationId : foundproject.organizationId || req.user.organizationId,
+        projectId : foundproject._id,
+        lastUsedAt : new Date()
+    })
+
+    return res
+        .status(201)
+        .json(new APIResponse(201, {
+            id: apiKey._id,
+            key: full,            // shown ONCE — store it now
+            keyPrefix: prefix,
+            projectId: apiKey.projectId,
+            credits: apiKey.credits,
+            createdAt: apiKey.createdAt
+        }, "New APIKey created. Copy it now — it will not be shown again."))
 })
 
 export {

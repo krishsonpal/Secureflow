@@ -2,11 +2,19 @@ import { Server } from "socket.io";
 
 let io;
 
+// Explicit allowed origins — no wildcard. Prefers CORS_ORIGIN, then the
+// FRONTEND_URL list, then a safe localhost default for dev.
+const socketOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || "http://localhost:5173,http://localhost:4000")
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
 export const initSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: process.env.CORS_ORIGIN || "*",
-            methods: ["GET", "POST"]
+            origin: socketOrigins,
+            methods: ["GET", "POST"],
+            credentials: true
         }
     });
 

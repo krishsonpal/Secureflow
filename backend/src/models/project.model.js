@@ -5,6 +5,11 @@ const projectSchema = new Schema({
         type : Schema.Types.ObjectId,
         ref : "User"
     },
+    organizationId : {
+        type : Schema.Types.ObjectId,
+        ref : "Organization",
+        index : true
+    },
     projectName : {
         type : String,
         required : [true , "Project name is required"],

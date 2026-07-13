@@ -2,11 +2,13 @@ import { APIResponse } from "../utils/apiresponse.js";
 import { APIError } from "../utils/apierror.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
+import { Organization } from "../models/organization.model.js";
 
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose";
 import { generateOtp } from "../utils/generateOtp.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import { hashToken } from "../utils/tokens.js";
 
 
 const generateAccessAndRefreshToken = async (userId) => {
@@ -15,7 +17,9 @@ const generateAccessAndRefreshToken = async (userId) => {
         const accessToken = await user.generateAccessToken()
         const refreshToken = await user.generateRefreshToken()
 
-        user.refreshToken = refreshToken
+        // Store only a hash of the refresh token — a DB leak no longer yields a
+        // usable token. The plaintext is returned to the client (cookie) once.
+        user.refreshToken = hashToken(refreshToken)
         await user.save({validateBeforeSave : false})
 
         return { accessToken , refreshToken }
@@ -61,6 +65,15 @@ const registerUser = asyncHandler(async (req,res,next) =>
         email,
         password
     })
+
+    // Every user gets a personal organization — the tenant key that all their
+    // projects/keys/usage records will carry.
+    const organization = await Organization.create({
+        name: `${username}'s Organization`,
+        ownerUserId: user._id
+    })
+    user.organizationId = organization._id
+    await user.save({ validateBeforeSave: false })
 
     const createdUser = await User.findById(user._id).select(
         "-password -refreshToken"
@@ -109,7 +122,6 @@ const loginUser = asyncHandler( async(req,res,next)  =>{
         secure : true,
         sameSite : "none"
     }
-    console.log(accessToken)
     return res
     .status(200)
     .cookie("accessToken",accessToken,options)
@@ -185,7 +197,7 @@ const refreshToken = asyncHandler( async (req,res,next) =>{
             throw new APIError(401,"Invalid refresh token")
         }
 
-        if(incomingRefreshToken !== user?.refreshToken)
+        if(hashToken(incomingRefreshToken) !== user?.refreshToken)
         {
             throw new APIError(401,"Refresh token is expired or used")
         }

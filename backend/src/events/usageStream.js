@@ -1,0 +1,29 @@
+import { redis } from "../app.js"
+
+// Redis Stream that carries usage/security events off the request hot path.
+// The request handler only does a single XADD here and returns; a consumer-group
+// worker (workers/usageWorker.js) drains the stream and does the Mongo write +
+// socket emit. (Part 1.4 of the roadmap.)
+export const USAGE_STREAM = "stream:usage"
+export const USAGE_GROUP = "usage-workers"
+
+// Approx cap so a long-running dev instance can't grow the stream unbounded.
+const STREAM_MAXLEN = 100000
+
+export const publishUsageEvent = async (event = {}) => {
+    try {
+        await redis.xadd(
+            USAGE_STREAM,
+            "MAXLEN", "~", STREAM_MAXLEN,
+            "*",
+            "apiKey", event.apiKey ?? "",
+            "fingerprint", event.fingerprint ?? "",
+            "status", event.status ?? "",
+            "message", event.message ?? "",
+            "ts", Date.now().toString()
+        )
+    } catch (e) {
+        // Never let telemetry publishing break the request.
+        console.error("[eventbus] failed to publish usage event:", e?.message || e)
+    }
+}

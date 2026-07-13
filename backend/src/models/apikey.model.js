@@ -2,15 +2,26 @@ import mongoose, {Schema} from "mongoose";
 
 const apikeySchema = new Schema(
     {
+        // Stores the sha256 HASH of the API key, never the plaintext. Lookups
+        // hash the incoming key first. A DB dump no longer leaks usable keys.
         key :{
             type : String,
             required : true,
+        },
+        // Non-secret display fragment (e.g. "sk_live_ab12cd…") for the dashboard.
+        keyPrefix : {
+            type : String
         },
         userId : {
             type : Schema.Types.ObjectId,
             ref : "User",
             required : true,
 
+        },
+        organizationId : {
+            type : Schema.Types.ObjectId,
+            ref : "Organization",
+            index : true
         },
         projectId : {
             type : Schema.Types.ObjectId,
@@ -40,5 +51,10 @@ const apikeySchema = new Schema(
         timestamps : true
     }
 )
+
+// Hot-path lookup: checkuserlimit / logUsage do ApiKey.findOne({ key }).
+// Unique index turns a full-collection scan into an O(log n) point lookup.
+// NOTE: Phase 1 replaces plaintext `key` with a hashed `keyHash`; index moves then.
+apikeySchema.index({ key: 1 }, { unique: true })
 
 export const ApiKey =  mongoose.model("ApiKey",apikeySchema)

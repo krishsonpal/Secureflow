@@ -2,24 +2,39 @@ import dotenv from "dotenv"
 import connectDB from "./db/index.js"
 import {app} from "./app.js"
 import http from "http"
-import { initSocket } from "./socket.js"
+import { initSocket, getIO } from "./socket.js"
+import { startUsageWorker } from "./workers/usageWorker.js"
 
 dotenv.config({
     path: "./.env"
+})
+
+// Process-level safety nets: log instead of dying silently. These keep a stray
+// rejected promise or thrown async error from taking the whole server down.
+process.on("unhandledRejection", (reason) => {
+    console.error("[process] unhandledRejection:", reason)
+})
+process.on("uncaughtException", (err) => {
+    console.error("[process] uncaughtException:", err)
 })
 
 connectDB().then(
     () =>{
         const server = http.createServer(app);
         initSocket(server);
-        
+
+        // Run the usage-stream worker in-process (laptop/MVP). It can also run as
+        // a standalone process via `npm run worker` for scale-out. In-process it
+        // gets a socket emitter so dashboard updates keep flowing.
+        startUsageWorker((room, payload) => getIO().to(room).emit("dashboard-update", payload))
+
         server.listen(process.env.PORT || 3000,() =>
             console.log("connection made successfully on port", process.env.PORT || 3000)
         )
     }
 ).catch(
     (err) =>{
-        console.log("An error has occured")
+        console.error("Failed to start server:", err?.message || err)
+        process.exit(1)
     }
 )
-

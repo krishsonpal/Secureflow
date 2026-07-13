@@ -7,37 +7,41 @@ import { logUsageAsync } from "../utils/logusage.js";
 import { ClientUserSchema } from "../models/clientuser.model.js";
 import { APIUsage } from "../models/apiusage.model.js";
 import {sendEmail} from "../utils/sendEmail.js"
+import { hashToken } from "../utils/tokens.js"
 
 
 const processPostLoginTasks = async (data) => {
     try {
         const { email, fingerprint, apiKeyId } = data;
-        
-        const keyDoc = await ApiKey.findOne({ key: apiKeyId }).populate("projectId");
-        
+
+        const keyDoc = await ApiKey.findOne({ key: hashToken(apiKeyId) }).populate("projectId");
+
         if (!keyDoc) return;
 
         const projectId = keyDoc.projectId;
+        const organizationId = keyDoc.organizationId;
 
         const existingUser = await ClientUserSchema.findOne({
             fingerPrint: fingerprint,
             projectId: projectId
         });
-        
-        
+
+
         if (!existingUser) {
             await ClientUserSchema.create({
                 fingerPrint: fingerprint,
-                projectId: projectId
+                projectId: projectId,
+                organizationId: organizationId
             });
             sendEmail(email,"New device register")
 
-            
+
         }
-        
+
         const usage = await APIUsage.create({
             apiKey: keyDoc._id,
             projectId: projectId,
+            organizationId: organizationId,
             fingerprint: fingerprint,
             status: "success"
         });
