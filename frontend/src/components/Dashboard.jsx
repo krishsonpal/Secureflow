@@ -44,13 +44,17 @@ const Dashboard = () => {
   const currentIntervalCounts = useRef({ requests: 0, threats: 0 });
 
   useEffect(() => {
-    // Connect to Socket.IO server
+    // Connect to Socket.IO server. The handshake is now authenticated (Part 1.7):
+    // send the access token so the server can verify identity and authorize which
+    // project rooms this socket may join.
     const newSocket = io(API_BASE_URL, {
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      withCredentials: true,
+      auth: { token: localStorage.getItem('accessToken') }
     });
-    
+
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
@@ -58,6 +62,17 @@ const Dashboard = () => {
       if (projectId) {
         newSocket.emit('join-project', projectId);
       }
+    });
+
+    // Surfaced when the server rejects a room join (not owner / not authorized).
+    newSocket.on('join-error', (info) => {
+      console.warn('Socket join refused:', info);
+    });
+
+    // Auth failures arrive as connect_error with the server's message.
+    newSocket.on('connect_error', (err) => {
+      setConnected(false);
+      console.error('Socket connection error:', err?.message);
     });
 
     newSocket.on('disconnect', () => {

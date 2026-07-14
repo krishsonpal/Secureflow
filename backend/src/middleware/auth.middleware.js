@@ -1,33 +1,23 @@
-import jwt from "jsonwebtoken"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { APIError } from "../utils/apierror.js"
-import { User } from "../models/user.model.js"
+import { resolveUserFromToken } from "../utils/verifyAccessToken.js"
 
 // Shared authentication middleware. Replaces the inline `jwt.verify(...)` that
 // each protected controller used to re-implement (and which left `req.user`
 // unpopulated). Verifies the access token and attaches the user to `req.user`.
+// Token verification is delegated to the shared resolver so the HTTP path and the
+// Socket.io handshake authenticate identically (Part 1.7).
 export const verifyJWT = asyncHandler(async (req, res, next) => {
     const token =
         req.cookies?.accessToken ||
         req.headers.authorization?.replace(/^Bearer\s+/i, "").trim()
 
-    if (!token) {
-        throw new APIError(401, "Unauthorized: access token missing")
-    }
-
-    let decoded
     try {
-        decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET)
-    } catch {
-        throw new APIError(401, "Unauthorized: invalid or expired access token")
+        req.user = await resolveUserFromToken(token)
+    } catch (err) {
+        throw new APIError(401, `Unauthorized: ${err.message}`)
     }
 
-    const user = await User.findById(decoded?._id).select("-password -refreshToken")
-    if (!user) {
-        throw new APIError(401, "Unauthorized: user no longer exists")
-    }
-
-    req.user = user
     next()
 })
 

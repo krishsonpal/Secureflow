@@ -3,15 +3,16 @@ dotenv.config({ path: "./.env" })
 
 import connectDB from "../db/index.js"
 import { startUsageWorker } from "./usageWorker.js"
+import { createRedisEmitter } from "../utils/socketEmitter.js"
 
-// Standalone worker process (for scale-out). Note: without the Socket.io Redis
-// adapter (Part 1.7) this process can persist events but cannot emit dashboard
-// updates — so for the single-node MVP prefer the in-process worker started by
-// src/index.js. Run with: npm run worker
+// Standalone worker process (for scale-out). As of Part 1.7 it emits dashboard
+// updates too, via a serverless Socket.io + Redis-adapter emitter that fans out
+// to the API server's connected sockets. Run with: npm run worker
 connectDB()
     .then(async () => {
-        await startUsageWorker() // no emitter → persistence only
-        console.log("[worker] standalone usage worker running")
+        const emit = createRedisEmitter()
+        await startUsageWorker(emit) // persists AND emits across processes
+        console.log("[worker] standalone usage worker running (with cross-process emit)")
     })
     .catch((err) => {
         console.error("[worker] failed to start:", err?.message || err)
