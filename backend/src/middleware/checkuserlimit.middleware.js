@@ -40,7 +40,9 @@ const checkuserlimit = asyncHandler(async (req, res, next) => {
         await redis.hset(cacheKey,
             "credits", dbKey.credits,
             "status", dbKey.status,
-            "id", dbKey._id.toString()
+            "id", dbKey._id.toString(),
+            "projectId", dbKey.projectId?.toString() || "",
+            "organizationId", dbKey.organizationId?.toString() || ""
         );
         await redis.expire(cacheKey, CACHE_TTL_SECONDS);
         result = await redis.eval(DECREMENT_LUA, 1, cacheKey);
@@ -55,9 +57,15 @@ const checkuserlimit = asyncHandler(async (req, res, next) => {
         return res.status(402).json(new APIResponse(402, {}, "Credits are finished"));
     }
 
+    // Pull the resolved identity in one round-trip. Downstream middleware
+    // (rate limiter) needs the SERVER-TRUSTED dimensions — apiKey hash / project /
+    // org — so it never has to trust client-supplied sessionId/fingerprint.
+    const [id, projectId, organizationId] = await redis.hmget(
+        cacheKey, "id", "projectId", "organizationId"
+    );
+
     // Allowed. Mirror the decrement to Mongo off the response path (fire-and-forget);
     // the TTL reload keeps Redis and Mongo reconciled. (Part 1.4 moves this to a worker.)
-    const id = await redis.hget(cacheKey, "id");
     if (id) {
         ApiKey.updateOne(
             { _id: id },
@@ -66,6 +74,10 @@ const checkuserlimit = asyncHandler(async (req, res, next) => {
     }
 
     req.apiCreditsRemaining = result;
+    req.apiKeyId = id || null;
+    req.apiKeyHash = keyHash;
+    req.projectId = projectId || null;
+    req.organizationId = organizationId || null;
     next();
 });
 

@@ -8,6 +8,7 @@ import { ClientUserSchema } from "../models/clientuser.model.js";
 import { APIUsage } from "../models/apiusage.model.js";
 import {sendEmail} from "../utils/sendEmail.js"
 import { hashToken } from "../utils/tokens.js"
+import { loadSecurityRule } from "../utils/securityRule.js"
 
 
 const processPostLoginTasks = async (data) => {
@@ -103,22 +104,36 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
         throw new APIError(400, "Fingerprint is required");
     }
 
-    const failKey = `fail:fp:${fingerprint}`;
-    const attempts = await redis.incr(failKey);
+    // Scope the lockout to SERVER-TRUSTED dimensions. The old `fail:fp:<fingerprint>`
+    // key was entirely client-supplied: an attacker rotated the fingerprint to dodge
+    // the lock, or forged someone else's to lock them out. We now bucket by the
+    // resolved apiKey hash + observed IP, and additionally cap per-IP so
+    // fingerprint-rotation from one origin still trips a lock.
+    const scope = req.apiKeyHash || "anon";
+    const ip = req.ip || "unknown";
+    const rule = await loadSecurityRule(req.projectId);
+    const fpLimit = rule.otpLimit;            // per device fingerprint
+    const ipLimit = rule.otpLimit * 5;        // coarser per-IP ceiling
 
-    if (attempts === 1) {
-        await redis.expire(failKey, 86400); 
-    }
+    const fpKey = `fail:fp:${scope}:${fingerprint}`;
+    const ipKey = `fail:ip:${scope}:${ip}`;
 
-    if (attempts > 5) {
+    const [fpAttempts, ipAttempts] = await Promise.all([
+        redis.incr(fpKey),
+        redis.incr(ipKey),
+    ]);
+    if (fpAttempts === 1) await redis.expire(fpKey, 86400);
+    if (ipAttempts === 1) await redis.expire(ipKey, 86400);
 
+    const locked = fpAttempts > fpLimit || ipAttempts > ipLimit;
 
+    if (locked) {
         await logUsageAsync(apiKey, fingerprint, "failed");
         return res.status(423).json(
             new APIResponse(
-                423, 
-                { isLocked: true, attempts, reason: "Rate limit exceeded" }, 
-                "Security Alert: This device fingerprint is currently locked."
+                423,
+                { isLocked: true, attempts: fpAttempts, reason: "Too many failed attempts" },
+                "Security Alert: This device is currently locked."
             )
         );
     }
@@ -127,8 +142,8 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
 
     return res.status(401).json(
         new APIResponse(
-            401, 
-            { isLocked: false, attemptsLeft: 5 - attempts }, 
+            401,
+            { isLocked: false, attemptsLeft: Math.max(0, fpLimit - fpAttempts) },
             "Invalid login attempt."
         )
     );
@@ -159,26 +174,10 @@ const validateAndProcessRequest = asyncHandler(async (req, res) => {
         return res.status(403).json(new APIResponse(403, null, "Fingerprint mismatch"));
     }
 
-    // Atomic Rate Limiting (10 req / 60 sec)
-    const rateLimitKey = `rate:session:${sessionId}`;
-    const luaScript = `
-        local current = redis.call("INCR", KEYS[1])
-        if current == 1 then
-            redis.call("EXPIRE", KEYS[1], 60)
-        end
-        return current
-    `;
-
-    const requestCount = await redis.eval(luaScript, 1, rateLimitKey);
-
-    if (requestCount > 10) {
-        // Log the rate limit hit asynchronously for the dashboard
-        await logUsageAsync(apiKey, fingerprint, "rate-limited");
-
-        return res.status(429).json(
-            new APIResponse(429, { retryAfter: "60s" }, "Rate limit exceeded")
-        );
-    }
+    // Rate limiting moved to `enforceRateLimit` middleware (Part 1.6): it keys on
+    // the server-trusted apiKey hash + client IP (not the client-supplied
+    // sessionId, which the old inline limiter used and which rotating sessionIds
+    // trivially bypassed) and pulls the limit from the project's SecurityRule.
 
     // Success - Log usage and return data
     await logUsageAsync(apiKey, fingerprint, "success");

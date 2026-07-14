@@ -9,10 +9,16 @@ import userRouter from "./routes/user.routes.js"
 import projectRouter from "./routes/project.routes.js"
 import apirouter from "./routes/apikey.routes.js"
 import servicerouter from "./routes/bonding.routes.js"
+import { globalRateLimit } from "./middleware/globalRateLimit.middleware.js"
 
 
 
 const app = express()
+
+// Trust the first proxy hop so req.ip reflects the real client (X-Forwarded-For)
+// rather than the load balancer. The per-IP rate limiters key off req.ip, so an
+// untrusted proxy setup would otherwise bucket every client under one IP.
+app.set("trust proxy", 1)
 
 
 
@@ -63,6 +69,11 @@ app.get("/readyz", async (req, res) => {
         redis: redisUp ? "up" : "down"
     })
 })
+
+// --- Global per-IP backstop ---
+// Applied to all API traffic (health probes above stay unlimited for monitoring).
+// Runs before per-identity limits so a key/session-rotating flood is capped here.
+app.use("/api/v1", globalRateLimit)
 
 // --- API routes ---
 app.use("/api/v1/users", userRouter)
