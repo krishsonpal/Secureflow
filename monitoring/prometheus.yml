@@ -1,0 +1,21 @@
+# Prometheus scrape config for the SecureFlow backend.
+# Wired into the full stack by docker-compose in Part 1.13. The backend exposes
+# Prometheus metrics at GET /metrics (default Node/process metrics + custom HTTP
+# and security counters).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: secureflow-backend
+    metrics_path: /metrics
+    static_configs:
+      # "backend" is the compose service name; use host.docker.internal or
+      # localhost:3000 when running Prometheus outside the compose network.
+      - targets: ["backend:3000"]
+        labels:
+          service: secureflow-backend
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

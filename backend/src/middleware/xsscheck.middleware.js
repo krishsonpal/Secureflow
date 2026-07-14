@@ -3,6 +3,7 @@ import { logUsageAsync } from "../utils/logusage.js";
 import { redis } from "../app.js";
 import { hashToken } from "../utils/tokens.js";
 import { CircuitBreaker } from "../utils/circuitBreaker.js";
+import { incSecurityEvent } from "../observability/metrics.js";
 
 const ML_TIMEOUT_MS = Number(process.env.ML_TIMEOUT_MS) || 1500;
 const VERDICT_TTL_SECONDS = Number(process.env.XSS_CACHE_TTL) || 300;
@@ -26,6 +27,7 @@ const XSS_FAIL_OPEN = process.env.XSS_FAIL_OPEN !== "false";
 const mlBreaker = new CircuitBreaker({ failureThreshold: 5, cooldownMs: 30000, name: "ml-xss" });
 
 const blockAsXSS = async (req, res, details) => {
+    incSecurityEvent("xss_blocked");
     const { apiKey, fingerprint } = req.body;
     if (apiKey && fingerprint) {
         await logUsageAsync(apiKey, fingerprint, "xss", "Malicious payload detected by AI model");

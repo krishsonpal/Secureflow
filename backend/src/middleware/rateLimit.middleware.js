@@ -4,6 +4,7 @@ import { redis } from "../app.js";
 import { rateLimit } from "../utils/rateLimiter.js";
 import { loadSecurityRule } from "../utils/securityRule.js";
 import { logUsageAsync } from "../utils/logusage.js";
+import { incSecurityEvent } from "../observability/metrics.js";
 
 /**
  * Per-identity rate limiter for the SDK hot path. MUST run AFTER checkuserlimit,
@@ -38,6 +39,7 @@ export const enforceRateLimit = asyncHandler(async (req, res, next) => {
     try {
         if (await redis.exists(banKey)) {
             const ttl = Number(await redis.ttl(banKey));
+            incSecurityEvent("rate_limited");
             await logUsageAsync(req.body?.apiKey, req.body?.fingerprint, "rate-limited", "Temporarily banned for exceeding rate limit.");
             return res.status(429).json(
                 new APIResponse(429, { retryAfter: ttl > 0 ? ttl : rule.banDuration, banned: true }, "Too many requests — temporarily banned")
@@ -60,6 +62,7 @@ export const enforceRateLimit = asyncHandler(async (req, res, next) => {
                 .catch((e) => console.error("[rateLimit] set ban failed:", e?.message));
         }
 
+        incSecurityEvent("rate_limited");
         await logUsageAsync(req.body?.apiKey, req.body?.fingerprint, "rate-limited");
         return res.status(429).json(
             new APIResponse(429, { retryAfter }, "Rate limit exceeded")

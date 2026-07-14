@@ -3,6 +3,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { redis } from "../app.js"
 import { ApiKey } from "../models/apikey.model.js";
 import { hashToken } from "../utils/tokens.js";
+import { incSecurityEvent } from "../observability/metrics.js";
 
 const CACHE_TTL_SECONDS = 300;
 
@@ -51,9 +52,11 @@ const checkuserlimit = asyncHandler(async (req, res, next) => {
     result = Number(result);
 
     if (result === -3) {
+        incSecurityEvent("key_revoked");
         return res.status(403).json(new APIResponse(403, {}, "API key revoked"));
     }
     if (result === -1) {
+        incSecurityEvent("credits_exhausted");
         return res.status(402).json(new APIResponse(402, {}, "Credits are finished"));
     }
 

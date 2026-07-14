@@ -10,6 +10,9 @@ import projectRouter from "./routes/project.routes.js"
 import apirouter from "./routes/apikey.routes.js"
 import servicerouter from "./routes/bonding.routes.js"
 import { globalRateLimit } from "./middleware/globalRateLimit.middleware.js"
+import { correlationId, requestObserver } from "./middleware/observability.middleware.js"
+import { registry, metricsContentType } from "./observability/metrics.js"
+import { logger } from "./utils/logger.js"
 
 
 
@@ -19,6 +22,11 @@ const app = express()
 // rather than the load balancer. The per-IP rate limiters key off req.ip, so an
 // untrusted proxy setup would otherwise bucket every client under one IP.
 app.set("trust proxy", 1)
+
+// Observability first: every request gets a correlation id (req.id + X-Request-Id)
+// and a structured access log + Prometheus metrics on completion.
+app.use(correlationId)
+app.use(requestObserver)
 
 
 
@@ -70,6 +78,18 @@ app.get("/readyz", async (req, res) => {
     })
 })
 
+// --- Prometheus scrape endpoint ---
+// Exposes default Node/process metrics + custom HTTP and security counters.
+// Intended for internal scraping; put it behind the network boundary in prod.
+app.get("/metrics", async (req, res) => {
+    try {
+        res.setHeader("Content-Type", metricsContentType)
+        res.end(await registry.metrics())
+    } catch (err) {
+        res.status(500).end(err?.message || "metrics error")
+    }
+})
+
 // --- Global per-IP backstop ---
 // Applied to all API traffic (health probes above stay unlimited for monitoring).
 // Runs before per-identity limits so a key/session-rotating flood is capped here.
@@ -88,6 +108,15 @@ app.use("/api/v1/service",servicerouter)
 app.use((err, req, res, next) => {
     const statusCode = err.statuscode || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+
+    // Structured error log with the request's correlation id. Log the stack for
+    // real 500s; expected 4xx (validation/auth) stay quiet at warn without stack.
+    const log = req.log || logger;
+    if (statusCode >= 500) {
+        log.error("request_error", { path: req.originalUrl, status: statusCode, message, stack: err.stack });
+    } else {
+        log.warn("request_rejected", { path: req.originalUrl, status: statusCode, message });
+    }
 
     return res.status(statusCode).json({
         success: false,
