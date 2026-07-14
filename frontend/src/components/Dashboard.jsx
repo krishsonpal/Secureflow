@@ -51,8 +51,9 @@ const Dashboard = () => {
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       transports: ['websocket', 'polling'],
-      withCredentials: true,
-      auth: { token: localStorage.getItem('accessToken') }
+      // withCredentials sends the httpOnly accessToken cookie; the server
+      // authenticates the handshake from it (Part 1.7 + 1.12 httpOnly).
+      withCredentials: true
     });
 
     setSocket(newSocket);
@@ -138,8 +139,30 @@ const Dashboard = () => {
         console.error('Error fetching analytics:', error);
       }
     };
-    
+
+    // Seed the chart with REAL history (Part 1.12) instead of starting from
+    // zeros — the live socket updates then append onto real trend data.
+    const fetchTrends = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/projects/${projectId}/timeseries?hours=2&buckets=20`, { withCredentials: true });
+        if (res.data.success && Array.isArray(res.data.data.series)) {
+          const seeded = res.data.data.series.map((p) => ({
+            time: new Date(p.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }),
+            requests: p.requests,
+            threats: p.threats,
+          }));
+          if (seeded.length) {
+            chartDataRef.current = seeded;
+            setChartData(seeded);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching trends:', error);
+      }
+    };
+
     fetchAnalytics();
+    fetchTrends();
   }, [projectId]);
 
   // Auto-join socket room when project or connection changes

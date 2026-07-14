@@ -5,6 +5,17 @@ import { Project } from "../models/project.model.js";
 
 import { APIUsage } from "../models/apiusage.model.js";
 import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js";
+import { SecurityRule } from "../models/securityrule.model.js";
+import { loadSecurityRule, invalidateSecurityRule } from "../utils/securityRule.js";
+
+// Assert the project belongs to the authenticated user; returns the project or
+// throws 404. Shared by the analytics/timeseries/security-rule endpoints.
+const assertOwnedProject = async (projectId, userId) => {
+    if (!projectId) throw new APIError(400, "ProjectId is missing")
+    const project = await Project.findOne({ _id: projectId, userId })
+    if (!project) throw new APIError(404, "Project not found or unauthorized")
+    return project
+}
 
 // Read the cumulative rollup for a project. If it doesn't exist yet (project
 // predates Part 1.8, or has never been rolled up), backfill it once from the
@@ -121,22 +132,125 @@ const getProjectAnalytics = asyncHandler(async (req, res) => {
 
     const activeSessions = activeSessionsResult.length > 0 ? activeSessionsResult[0].uniqueSessions : 0
 
+    // byStatus is a Mongo Map on a hydrated rollup; normalize to a plain object
+    // (absent on the lazy-backfill path).
+    const byStatus = rollup.byStatus instanceof Map
+        ? Object.fromEntries(rollup.byStatus)
+        : (rollup.byStatus || {})
+
     return res.status(200).json(
         new APIResponse(200, {
             metrics: {
                 totalRequests: rollup.totalRequests || 0,
                 threatsBlocked: rollup.threatsBlocked || 0,
                 rateLimited: rollup.rateLimited || 0,
-                activeSessions: activeSessions === 0 ? 1 : activeSessions // default to 1 for visual
+                activeSessions: activeSessions === 0 ? 1 : activeSessions, // default to 1 for visual
+                byStatus
             },
             logs: recentLogs
         }, "Project analytics fetched successfully")
     )
 })
 
+// Real trend data: bucket APIUsage over a window so the dashboard chart shows
+// actual history instead of only live-accumulated points. ?hours=24 (default),
+// ?buckets=24 → one point per hour. Threats counted alongside total requests.
+const getProjectTimeseries = asyncHandler(async (req, res) => {
+    const { projectId } = req.params
+    const project = await assertOwnedProject(projectId, req.user._id)
+
+    const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168) // cap 7d
+    const buckets = Math.min(Math.max(Number(req.query.buckets) || hours, 1), 168)
+    const windowMs = hours * 60 * 60 * 1000
+    const bucketMs = Math.floor(windowMs / buckets) // integer ms so bucket keys align
+
+    // Anchor the LAST bucket on the current bucket so freshly-created events (which
+    // land in "now"'s bucket) are included; walk back `buckets-1` steps for the start.
+    const endBucket = Math.floor(Date.now() / bucketMs) * bucketMs
+    const startBucket = endBucket - (buckets - 1) * bucketMs
+    const since = new Date(startBucket)
+
+    const rows = await APIUsage.aggregate([
+        { $match: { projectId: project._id, createdAt: { $gte: since } } },
+        {
+            $group: {
+                _id: {
+                    $toLong: {
+                        $subtract: [
+                            { $toLong: "$createdAt" },
+                            { $mod: [{ $toLong: "$createdAt" }, bucketMs] }
+                        ]
+                    }
+                },
+                requests: { $sum: 1 },
+                threats: { $sum: { $cond: [{ $in: ["$status", THREAT_STATUSES] }, 1, 0] } }
+            }
+        },
+        { $sort: { _id: 1 } }
+    ])
+
+    // Fill empty buckets so the chart has a continuous X axis.
+    const byBucket = new Map(rows.map((r) => [Number(r._id), r]))
+    const series = []
+    for (let i = 0; i < buckets; i++) {
+        const ts = startBucket + i * bucketMs
+        const hit = byBucket.get(ts)
+        series.push({
+            timestamp: new Date(ts).toISOString(),
+            requests: hit?.requests || 0,
+            threats: hit?.threats || 0
+        })
+    }
+
+    return res.status(200).json(
+        new APIResponse(200, { hours, buckets, series }, "Timeseries fetched successfully")
+    )
+})
+
+// Read the project's SecurityRule (falls back to defaults if none set yet).
+const getSecurityRule = asyncHandler(async (req, res) => {
+    await assertOwnedProject(req.params.projectId, req.user._id)
+    const rule = await loadSecurityRule(req.params.projectId)
+    return res.status(200).json(new APIResponse(200, rule, "Security rule fetched"))
+})
+
+// Create/update the project's SecurityRule and invalidate the cached copy so the
+// rate limiter picks up the change immediately. (Closes the Part 1.6 deferred
+// admin-route item.)
+const updateSecurityRule = asyncHandler(async (req, res) => {
+    const { projectId } = req.params
+    await assertOwnedProject(projectId, req.user._id)
+
+    const allowed = ["rateLimit", "rateWindow", "otpLimit", "blockBots", "banDuration", "whitelistips"]
+    const update = {}
+    for (const k of allowed) {
+        if (req.body[k] === undefined) continue
+        if (k === "whitelistips") {
+            update[k] = Array.isArray(req.body[k]) ? req.body[k].map(String) : []
+        } else if (k === "blockBots") {
+            update[k] = Boolean(req.body[k])
+        } else {
+            const n = Number(req.body[k])
+            if (Number.isFinite(n) && n >= 0) update[k] = n
+        }
+    }
+
+    const rule = await SecurityRule.findOneAndUpdate(
+        { projectId },
+        { $set: { projectId, ...update } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    )
+    await invalidateSecurityRule(projectId)
+
+    return res.status(200).json(new APIResponse(200, rule, "Security rule updated"))
+})
+
 export {
     createNewProject,
     deleteProject,
     getMyProjects,
-    getProjectAnalytics
+    getProjectAnalytics,
+    getProjectTimeseries,
+    getSecurityRule,
+    updateSecurityRule
 }

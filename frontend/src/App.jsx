@@ -4,6 +4,9 @@ import Dashboard from './components/Dashboard';
 import Docs from './pages/Docs';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import LiveTraffic from './pages/LiveTraffic';
+import ThreatAnalysis from './pages/ThreatAnalysis';
+import Settings from './pages/Settings';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
@@ -28,14 +31,17 @@ function AppRoutes() {
           </ProtectedRoute>
         } 
       />
-      <Route 
-        path="/docs" 
+      <Route
+        path="/docs"
         element={
           <ProtectedRoute>
             <Docs />
           </ProtectedRoute>
-        } 
+        }
       />
+      <Route path="/live-traffic" element={<ProtectedRoute><LiveTraffic /></ProtectedRoute>} />
+      <Route path="/threat-analysis" element={<ProtectedRoute><ThreatAnalysis /></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
     </Routes>
   );
 }

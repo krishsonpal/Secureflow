@@ -7,54 +7,38 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Auth now rides entirely on httpOnly cookies (Part 1.12): the access/refresh
+  // tokens are never stored in localStorage (which is readable by any injected
+  // script — the XSS token-theft vector). withCredentials makes the browser
+  // attach the cookies automatically; the backend reads them for verifyJWT and
+  // refresh-token. Only the non-sensitive user profile is cached for UX.
   axios.defaults.withCredentials = true;
-  console.log("API URL:", import.meta.env.VITE_API_URL);
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
-  // Setup Axios interceptors
+  // On a 401, transparently attempt one cookie-based refresh, then retry. We
+  // can't read the httpOnly refresh cookie from JS, so we always try once and
+  // let the server decide; on failure we clear the session and go to login.
   useEffect(() => {
-    const requestInterceptor = axios.interceptors.request.use((config) => {
-      const token = localStorage.getItem('accessToken');
-      if (token && !config.headers.Authorization) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      return config;
-    }, (error) => {
-      return Promise.reject(error);
-    });
-
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
-        if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url.includes('/refresh-token')) {
+        if (
+          error.response?.status === 401 &&
+          originalRequest &&
+          !originalRequest._retry &&
+          !originalRequest.url?.includes('/refresh-token') &&
+          !originalRequest.url?.includes('/login')
+        ) {
           originalRequest._retry = true;
-          const refreshToken = localStorage.getItem('refreshToken');
-          
-          if (refreshToken) {
-            try {
-              const res = await axios.post(`${API_URL}/users/refresh-token`, { refreshToken }, { withCredentials: true });
-              if (res.data?.success || res.status === 200 || res.status === 201) {
-                const newAccessToken = res.data?.data?.accessToken;
-                if (newAccessToken) {
-                  localStorage.setItem('accessToken', newAccessToken);
-                  originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-                  return axios(originalRequest);
-                }
-              }
-            } catch (err) {
-              // Refresh failed
-              localStorage.removeItem('user');
-              localStorage.removeItem('accessToken');
-              localStorage.removeItem('refreshToken');
-              setUser(null);
-              window.location.href = '/login';
+          try {
+            const res = await axios.post(`${API_URL}/users/refresh-token`, {}, { withCredentials: true });
+            if (res.data?.success || res.status === 200 || res.status === 201) {
+              // New access token is set as an httpOnly cookie by the server; just retry.
+              return axios(originalRequest);
             }
-          } else {
-            // No refresh token available
+          } catch (err) {
             localStorage.removeItem('user');
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
             setUser(null);
             window.location.href = '/login';
           }
@@ -64,7 +48,6 @@ export const AuthProvider = ({ children }) => {
     );
 
     return () => {
-      axios.interceptors.request.eject(requestInterceptor);
       axios.interceptors.response.eject(responseInterceptor);
     };
   }, [API_URL]);
@@ -82,15 +65,10 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await axios.post(`${API_URL}/users/login`, { username, email, password }, { withCredentials: true });
       if (response.data.success) {
+        // Tokens are delivered as httpOnly cookies by the server; we only cache
+        // the non-sensitive user profile for UX. No tokens in localStorage.
         setUser(response.data.data.user);
         localStorage.setItem('user', JSON.stringify(response.data.data.user));
-        // Storing tokens for cross-site requests fallback
-        if (response.data.data.accessToken) {
-          localStorage.setItem('accessToken', response.data.data.accessToken);
-        }
-        if (response.data.data.refreshToken) {
-          localStorage.setItem('refreshToken', response.data.data.refreshToken);
-        }
         return { success: true };
       }
     } catch (error) {
@@ -115,10 +93,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Logout failed', error);
     } finally {
+      // Server clears the httpOnly cookies; we just drop the cached profile.
       setUser(null);
       localStorage.removeItem('user');
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
     }
   };
 
