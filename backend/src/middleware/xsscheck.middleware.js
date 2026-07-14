@@ -7,6 +7,16 @@ import { CircuitBreaker } from "../utils/circuitBreaker.js";
 const ML_TIMEOUT_MS = Number(process.env.ML_TIMEOUT_MS) || 1500;
 const VERDICT_TTL_SECONDS = Number(process.env.XSS_CACHE_TTL) || 300;
 
+// Shared secret for the ML service. When set, sent as x-api-key so the ML
+// service (which enforces it when its own ML_API_KEY is configured) accepts the
+// call. Left unset for local dev where the ML service runs open.
+const ML_API_KEY = process.env.MICROSERVICE_API_KEY || "";
+
+// Cap the payload we hand to the ML service — mirrors the service's own input
+// cap and avoids shipping a giant body over the wire. Oversized input skips the
+// ML call and is treated as unscannable (fail policy applies).
+const ML_MAX_CONTENT_CHARS = Number(process.env.ML_MAX_CONTENT_CHARS) || 100000;
+
 // Per-check policy. The XSS check is a security add-on, not a hard dependency,
 // so it fails OPEN by default (set XSS_FAIL_OPEN=false to fail closed).
 const XSS_FAIL_OPEN = process.env.XSS_FAIL_OPEN !== "false";
@@ -40,6 +50,12 @@ export const checkXSS = async (req, res, next) => {
         return next();
     }
 
+    // Oversized payloads: don't ship them to the ML service. Apply the fail
+    // policy (open by default) rather than blocking legitimate large bodies.
+    if (typeof input === "string" && input.length > ML_MAX_CONTENT_CHARS) {
+        return degrade(res, next, `payload exceeds ${ML_MAX_CONTENT_CHARS} chars`);
+    }
+
     const cacheKey = `xss:v:${hashToken(input)}`;
 
     // 1. Verdict cache — identical payloads skip the ML round trip entirely.
@@ -63,7 +79,10 @@ export const checkXSS = async (req, res, next) => {
         const response = await axios.post(
             process.env.MICROSERVICE_URI,
             { content: input },
-            { timeout: ML_TIMEOUT_MS }
+            {
+                timeout: ML_TIMEOUT_MS,
+                headers: ML_API_KEY ? { "x-api-key": ML_API_KEY } : undefined,
+            }
         );
         mlBreaker.onSuccess();
 
