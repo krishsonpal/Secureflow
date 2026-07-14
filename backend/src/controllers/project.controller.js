@@ -4,6 +4,30 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { Project } from "../models/project.model.js";
 
 import { APIUsage } from "../models/apiusage.model.js";
+import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js";
+
+// Read the cumulative rollup for a project. If it doesn't exist yet (project
+// predates Part 1.8, or has never been rolled up), backfill it once from the
+// APIUsage collection so the numbers are correct and every later read is O(1).
+// The worker is the steady-state writer; this is a one-time self-heal.
+const getOrBackfillRollup = async (projectId) => {
+    const existing = await UsageRollup.findOne({ projectId })
+    if (existing) return existing
+
+    const [totalRequests, threatsBlocked, rateLimited] = await Promise.all([
+        APIUsage.countDocuments({ projectId }),
+        APIUsage.countDocuments({ projectId, status: { $in: THREAT_STATUSES } }),
+        APIUsage.countDocuments({ projectId, status: "rate-limited" }),
+    ])
+
+    // $setOnInsert so a concurrent worker $inc (upsert) doesn't get clobbered.
+    await UsageRollup.updateOne(
+        { projectId },
+        { $setOnInsert: { projectId, totalRequests, threatsBlocked, rateLimited } },
+        { upsert: true }
+    )
+    return { totalRequests, threatsBlocked, rateLimited }
+}
 
 // NOTE: auth is now handled by the shared `verifyJWT` middleware, which
 // populates `req.user`. Controllers no longer re-implement jwt.verify or wrap
@@ -81,35 +105,28 @@ const getProjectAnalytics = asyncHandler(async (req, res) => {
         throw new APIError(404, "Project not found or unauthorized")
     }
 
-    // (Part 1.8 will parallelize these and read from rollups instead of scans.)
-    const totalRequests = await APIUsage.countDocuments({ projectId })
-    const threatsBlocked = await APIUsage.countDocuments({
-        projectId,
-        status: { $in: ['failed', 'locked', 'xss', 'session-theft', 'bot'] }
-    })
-    const rateLimited = await APIUsage.countDocuments({
-        projectId,
-        status: 'rate-limited'
-    })
-
+    // Part 1.8: totals come from the O(1) rollup (no full-collection scan); the
+    // rollup read, the live "active sessions" window, and the recent-logs query
+    // are independent, so run them concurrently instead of sequentially.
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-    const activeSessionsResult = await APIUsage.aggregate([
-        { $match: { projectId: project._id, createdAt: { $gte: oneHourAgo } } },
-        { $group: { _id: "$fingerprint" } },
-        { $count: "uniqueSessions" }
+    const [rollup, activeSessionsResult, recentLogs] = await Promise.all([
+        getOrBackfillRollup(projectId),
+        APIUsage.aggregate([
+            { $match: { projectId: project._id, createdAt: { $gte: oneHourAgo } } },
+            { $group: { _id: "$fingerprint" } },
+            { $count: "uniqueSessions" }
+        ]),
+        APIUsage.find({ projectId }).sort({ createdAt: -1 }).limit(50)
     ])
-    const activeSessions = activeSessionsResult.length > 0 ? activeSessionsResult[0].uniqueSessions : 0
 
-    const recentLogs = await APIUsage.find({ projectId })
-        .sort({ createdAt: -1 })
-        .limit(50)
+    const activeSessions = activeSessionsResult.length > 0 ? activeSessionsResult[0].uniqueSessions : 0
 
     return res.status(200).json(
         new APIResponse(200, {
             metrics: {
-                totalRequests,
-                threatsBlocked,
-                rateLimited,
+                totalRequests: rollup.totalRequests || 0,
+                threatsBlocked: rollup.threatsBlocked || 0,
+                rateLimited: rollup.rateLimited || 0,
                 activeSessions: activeSessions === 0 ? 1 : activeSessions // default to 1 for visual
             },
             logs: recentLogs

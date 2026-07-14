@@ -1,8 +1,11 @@
 import Redis from "ioredis"
 import { ApiKey } from "../models/apikey.model.js"
 import { APIUsage } from "../models/apiusage.model.js"
+import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js"
 import { hashToken } from "../utils/tokens.js"
 import { USAGE_STREAM, USAGE_GROUP } from "../events/usageStream.js"
+
+const THREAT_SET = new Set(THREAT_STATUSES)
 
 const CONSUMER = `worker-${process.pid}`
 
@@ -42,6 +45,17 @@ const processEvent = async (fields, emit) => {
         status: obj.status,
         message: obj.message
     })
+
+    // Maintain the cumulative rollup so the dashboard reads O(1) totals instead
+    // of scanning APIUsage. Single atomic upsert; the worker is the sole writer.
+    const inc = { totalRequests: 1, [`byStatus.${obj.status}`]: 1 }
+    if (THREAT_SET.has(obj.status)) inc.threatsBlocked = 1
+    if (obj.status === "rate-limited") inc.rateLimited = 1
+    await UsageRollup.updateOne(
+        { projectId: keyDoc.projectId },
+        { $inc: inc, $set: { organizationId: keyDoc.organizationId, lastEventAt: new Date() } },
+        { upsert: true }
+    )
 
     if (emit) {
         try {
