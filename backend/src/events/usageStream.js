@@ -26,6 +26,9 @@ export const publishUsageEvent = async (event = {}) => {
             "riskScore", event.riskScore != null ? String(event.riskScore) : "",
             "action", event.action ?? "",
             "topSignal", event.topSignal ?? "",
+            // Phase 2.6 — client IP, consumed by the threat-intel worker to build
+            // IP reputation/history. Empty when the caller didn't pass it.
+            "ip", event.ip ?? "",
             "ts", Date.now().toString()
         )
     } catch (e) {

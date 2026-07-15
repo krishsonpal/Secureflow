@@ -37,6 +37,8 @@ const usageRollupSchema = new Schema(
 export const THREAT_STATUSES = [
     "failed", "locked", "xss", "session-theft", "bot",
     "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse", "prompt-injection",
+    // Phase 2.6 — threat-intel / account-takeover signals.
+    "reputation", "impossible-travel",
 ];
 
 export const UsageRollup = mongoose.model("UsageRollup", usageRollupSchema);

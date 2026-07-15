@@ -6,6 +6,10 @@ import { logUsageAsync } from "../utils/logusage.js";
 import { incSecurityEvent } from "../observability/metrics.js";
 import { score } from "../detection/scoring.js";
 import { evaluateRules } from "../detection/ruleEngine.js";
+import { addSignal } from "../detection/signal.js";
+import { lookupReputation } from "../detection/reputation.js";
+import { detectImpossibleTravel } from "../detection/detectors/impossibleTravel.js";
+import { resolveGeo } from "../detection/geo.js";
 
 // Map the top blocking signal to the APIUsage status used for analytics/rollups.
 // Each detector has a dedicated status so the dashboard can categorize blocks;
@@ -17,7 +21,56 @@ const STATUS_FOR_SIGNAL = {
     ssrf: "ssrf",
     "jwt-abuse": "jwt-abuse",
     "prompt-injection": "prompt-injection",
+    reputation: "reputation",
+    "impossible-travel": "impossible-travel",
 };
+
+/**
+ * Phase 2.6 — identity/IP-based signals resolved on the decision path (they need
+ * both req.ip AND the identity that `checkuserlimit` resolves, neither of which
+ * is available in the earlier `runDetectors` stage). Each is independently
+ * fail-open: a lookup error is logged and skipped, never blocks the request.
+ */
+async function addThreatIntelSignals(req) {
+    const ip = req.ip;
+
+    // Reputation: known-bad IP (external feeds) or a repeat offender (local counts).
+    try {
+        const rep = await lookupReputation({ ip, fingerprint: req.body?.fingerprint });
+        if (rep && rep.confidence > 0) {
+            addSignal(req, {
+                name: "reputation",
+                confidence: rep.confidence,
+                evidence: rep.evidence,
+                owasp: "API#—",
+                mitre: "T1595",
+            });
+        }
+    } catch (err) {
+        console.error("[decision] reputation lookup failed (skipped):", err?.message || err);
+    }
+
+    // Impossible travel: same identity from geographically impossible locations.
+    // Requires a resolvable geo (GeoLite2 configured) AND a server-trusted
+    // identity (the API-key hash) — skip cleanly otherwise.
+    try {
+        const geo = resolveGeo(ip);
+        if (geo && req.apiKeyHash) {
+            const it = await detectImpossibleTravel({ identity: req.apiKeyHash, geo });
+            if (it && it.confidence > 0) {
+                addSignal(req, {
+                    name: "impossible-travel",
+                    confidence: it.confidence,
+                    evidence: it.evidence,
+                    owasp: "API#2",
+                    mitre: "T1078",
+                });
+            }
+        }
+    } catch (err) {
+        console.error("[decision] impossible-travel check failed (skipped):", err?.message || err);
+    }
+}
 
 // Build the evaluation context that rules run against: the fused score, the
 // individual detector signals (name -> confidence), and request features.
@@ -50,6 +103,10 @@ function buildContext(req, decision) {
  * Fails OPEN throughout: a scoring or rule-load error must never block traffic.
  */
 export const decisionMiddleware = asyncHandler(async (req, res, next) => {
+    // Phase 2.6: resolve identity/IP-based signals FIRST, so a benign-payload
+    // request from a known-bad IP or an impossible geo is still scored below.
+    await addThreatIntelSignals(req);
+
     const signals = req.signals || [];
 
     let rules = [];
@@ -108,6 +165,7 @@ export const decisionMiddleware = asyncHandler(async (req, res, next) => {
             riskScore: decision.riskScore,
             action: "block",
             topSignal: topSignal || (forcedByRule ? `rule:${ruleResult.matched[0]?.name}` : "unknown"),
+            ip: req.ip, // Phase 2.6: carried to the threat-intel worker for fingerprinting
         }
     );
 

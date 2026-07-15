@@ -23,6 +23,8 @@ const apiUsageSchema = new Schema({
         enum: [
             "success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot",
             "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse", "prompt-injection",
+            // Phase 2.6 — threat-intel / account-takeover signals.
+            "reputation", "impossible-travel",
         ],
         default: "success"
     },
