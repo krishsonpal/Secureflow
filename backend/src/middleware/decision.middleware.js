@@ -1,9 +1,11 @@
 import { APIResponse } from "../utils/apiresponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { loadSecurityRule } from "../utils/securityRule.js";
+import { loadRules } from "../utils/detectionRules.js";
 import { logUsageAsync } from "../utils/logusage.js";
 import { incSecurityEvent } from "../observability/metrics.js";
 import { score } from "../detection/scoring.js";
+import { evaluateRules } from "../detection/ruleEngine.js";
 
 // Map the top blocking signal to the APIUsage status used for analytics/rollups.
 // Falls back to the generic "blocked" bucket for detectors that don't have a
@@ -12,21 +14,49 @@ const STATUS_FOR_SIGNAL = {
     xss: "xss",
 };
 
+// Build the evaluation context that rules run against: the fused score, the
+// individual detector signals (name -> confidence), and request features.
+function buildContext(req, decision) {
+    const signals = {};
+    for (const s of req.signals || []) signals[s.name] = s.confidence;
+    return {
+        riskScore: decision.riskScore,
+        trustScore: decision.trustScore,
+        scoreAction: decision.action,
+        signals,
+        signalNames: (req.signals || []).map((s) => s.name),
+        method: req.method,
+        path: req.originalUrl || req.path || "",
+        ip: req.ip || "",
+        projectId: req.projectId ? String(req.projectId) : "",
+        organizationId: req.organizationId ? String(req.organizationId) : "",
+    };
+}
+
 /**
- * Decision stage (Phase 2.1). Runs AFTER the detector middlewares (which now
- * emit signals onto `req.signals`) and after identity resolution (checkuserlimit
- * sets `req.projectId`). It fuses the signals via the scoring engine using the
- * project's policy, records the decision on the request + event, and enforces the
- * graduated action:
- *   - allow / challenge → continue (no step-up infra yet; the controller logs its
- *     own terminal status). The decision is left on `req.decision` for downstream use.
- *   - block            → 403 with the explainable topReasons.
+ * Decision stage (Phase 2.1 + 2.2). Runs AFTER the detector middlewares (which
+ * emit signals onto `req.signals`) and identity resolution. It:
+ *   1. fuses the signals via the weighted-sum scorer with the project's policy,
+ *   2. evaluates the project's declarative rules against the fused context —
+ *      a matching enforcing rule (allow/challenge/block) OVERRIDES the scored
+ *      action (allowlist bypass, forced block); "log" records a match only,
+ *   3. records the decision on the request + event and enforces the final action.
  *
- * Fails OPEN: a scoring error must never block legitimate traffic.
+ * Fails OPEN throughout: a scoring or rule-load error must never block traffic.
  */
 export const decisionMiddleware = asyncHandler(async (req, res, next) => {
     const signals = req.signals || [];
-    if (signals.length === 0) return next(); // fast path: no detector fired
+
+    let rules = [];
+    try {
+        rules = await loadRules(req.projectId);
+    } catch (err) {
+        console.error("[decision] rule load failed, ignoring rules:", err?.message || err);
+        rules = [];
+    }
+
+    // Fast path: no detector fired AND no rules to evaluate.
+    if (signals.length === 0 && rules.length === 0) return next();
 
     let decision;
     try {
@@ -37,32 +67,48 @@ export const decisionMiddleware = asyncHandler(async (req, res, next) => {
         return next();
     }
 
-    req.decision = decision;
+    // Rule engine: highest-priority matching enforcing rule overrides the score.
+    const ruleResult = evaluateRules(rules, buildContext(req, decision));
+    const ruleReasons = ruleResult.matched.map((m) => ({
+        name: `rule:${m.name}`,
+        action: m.action,
+        priority: m.priority,
+    }));
+    const finalAction = ruleResult.action || decision.action;
+
+    const topReasons = [...ruleReasons, ...decision.topReasons];
+    req.decision = { ...decision, finalAction, matchedRules: ruleResult.matched, topReasons };
     res.setHeader("X-SecureFlow-Risk", String(decision.riskScore));
 
-    if (decision.action !== "block") {
+    if (finalAction !== "block") {
+        // allow (incl. a rule overriding a would-be block) / challenge → continue.
         return next();
     }
 
-    const topSignal = decision.topReasons[0]?.name || "unknown";
-    const status = STATUS_FOR_SIGNAL[topSignal] || "blocked";
-    // Preserves the existing `xss_blocked` Prometheus series; new detectors get
-    // their own `<signal>_blocked` series for free.
-    incSecurityEvent(`${topSignal}_blocked`);
+    const topSignal = decision.topReasons[0]?.name || null;
+    const forcedByRule = ruleResult.action === "block";
+    const status = topSignal ? STATUS_FOR_SIGNAL[topSignal] || "blocked" : "blocked";
+    // Preserves the existing `<signal>_blocked` Prometheus series; a rule-only
+    // block (no signal) is counted under `rule_blocked`.
+    incSecurityEvent(topSignal ? `${topSignal}_blocked` : "rule_blocked");
 
-    const reasonList = decision.topReasons.map((r) => r.name).join(", ");
+    const reasonList = topReasons.map((r) => r.name).join(", ");
     await logUsageAsync(
         req.body?.apiKey,
         req.body?.fingerprint,
         status,
-        `Blocked (risk ${decision.riskScore}): ${reasonList}`,
-        { riskScore: decision.riskScore, action: decision.action, topSignal }
+        `Blocked (risk ${decision.riskScore}${forcedByRule ? ", rule" : ""}): ${reasonList}`,
+        {
+            riskScore: decision.riskScore,
+            action: "block",
+            topSignal: topSignal || (forcedByRule ? `rule:${ruleResult.matched[0]?.name}` : "unknown"),
+        }
     );
 
     return res.status(403).json(
         new APIResponse(
             403,
-            { blocked: true, riskScore: decision.riskScore, topReasons: decision.topReasons },
+            { blocked: true, riskScore: decision.riskScore, topReasons },
             "Request blocked by SecureFlow"
         )
     );

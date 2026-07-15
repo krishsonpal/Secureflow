@@ -7,6 +7,9 @@ import { APIUsage } from "../models/apiusage.model.js";
 import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js";
 import { SecurityRule } from "../models/securityrule.model.js";
 import { loadSecurityRule, invalidateSecurityRule } from "../utils/securityRule.js";
+import { DetectionRule } from "../models/detectionrule.model.js";
+import { invalidateRules } from "../utils/detectionRules.js";
+import { validateConditions } from "../detection/ruleEngine.js";
 
 // Assert the project belongs to the authenticated user; returns the project or
 // throws 404. Shared by the analytics/timeseries/security-rule endpoints.
@@ -245,6 +248,53 @@ const updateSecurityRule = asyncHandler(async (req, res) => {
     return res.status(200).json(new APIResponse(200, rule, "Security rule updated"))
 })
 
+// --- Detection rules (Phase 2.2) -------------------------------------------
+
+// List the project's detection rules (priority desc).
+const getDetectionRules = asyncHandler(async (req, res) => {
+    await assertOwnedProject(req.params.projectId, req.user._id)
+    const rules = await DetectionRule.find({ projectId: req.params.projectId }).sort({ priority: -1 })
+    return res.status(200).json(new APIResponse(200, rules, "Detection rules fetched"))
+})
+
+// Replace the project's entire detection-rule set (the visual builder / editor
+// PUTs the full array). Each rule is validated + normalized; the condition tree
+// is structurally checked so malformed rules never reach the hot path. Publishes
+// an invalidation so every process hot-reloads without a restart.
+const updateDetectionRules = asyncHandler(async (req, res) => {
+    const { projectId } = req.params
+    const project = await assertOwnedProject(projectId, req.user._id)
+
+    const input = Array.isArray(req.body?.rules) ? req.body.rules : null
+    if (!input) throw new APIError(400, "Body must be { rules: [...] }")
+
+    const docs = input.map((r) => {
+        if (!r || typeof r.name !== "string" || !r.name.trim()) {
+            throw new APIError(400, "Each rule needs a non-empty name")
+        }
+        const condErr = validateConditions(r.conditions)
+        if (condErr) throw new APIError(400, `Rule "${r.name}": ${condErr}`)
+        const action = ["allow", "log", "challenge", "block"].includes(r.action) ? r.action : "block"
+        return {
+            projectId,
+            organizationId: project.organizationId,
+            name: r.name.trim(),
+            description: typeof r.description === "string" ? r.description : "",
+            priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 0,
+            enabled: r.enabled !== false,
+            conditions: r.conditions,
+            action,
+        }
+    })
+
+    // Replace-all semantics keep the store in sync with the editor's view.
+    await DetectionRule.deleteMany({ projectId })
+    const created = docs.length ? await DetectionRule.insertMany(docs) : []
+    await invalidateRules(projectId)
+
+    return res.status(200).json(new APIResponse(200, created, "Detection rules updated"))
+})
+
 export {
     createNewProject,
     deleteProject,
@@ -252,5 +302,7 @@ export {
     getProjectAnalytics,
     getProjectTimeseries,
     getSecurityRule,
-    updateSecurityRule
+    updateSecurityRule,
+    getDetectionRules,
+    updateDetectionRules
 }

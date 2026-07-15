@@ -7,7 +7,9 @@ import {
     getProjectAnalytics,
     getProjectTimeseries,
     getSecurityRule,
-    updateSecurityRule
+    updateSecurityRule,
+    getDetectionRules,
+    updateDetectionRules
 } from "../controllers/project.controller.js"
 import { verifyJWT } from "../middleware/auth.middleware.js"
 
@@ -22,5 +24,6 @@ router.route("/my-projects").get(getMyProjects)
 router.route("/:projectId/analytics").get(getProjectAnalytics)
 router.route("/:projectId/timeseries").get(getProjectTimeseries)
 router.route("/:projectId/security-rule").get(getSecurityRule).put(updateSecurityRule)
+router.route("/:projectId/rules").get(getDetectionRules).put(updateDetectionRules)
 
 export default router
