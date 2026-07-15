@@ -18,9 +18,12 @@ const apiUsageSchema = new Schema({
     fingerprint: String,
     status: {
         type: String,
-        // "blocked" (Phase 2.1) = generic decision-engine block for a detector
-        // that doesn't yet have a dedicated status (dedicated ones added in 2.3).
-        enum: ["success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot", "blocked"],
+        // "blocked" (Phase 2.1) = generic decision-engine block (e.g. rule-only).
+        // sqli/nosqli/ssrf/jwt-abuse (Phase 2.3) are the per-detector block buckets.
+        enum: [
+            "success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot",
+            "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse",
+        ],
         default: "success"
     },
     message: String,

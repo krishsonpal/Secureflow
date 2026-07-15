@@ -32,7 +32,11 @@ const usageRollupSchema = new Schema(
 );
 
 // Statuses that count as a blocked threat (mirrors the dashboard's definition).
-// "blocked" (Phase 2.1) is the generic decision-engine block bucket.
-export const THREAT_STATUSES = ["failed", "locked", "xss", "session-theft", "bot", "blocked"];
+// "blocked" (Phase 2.1) is the generic decision-engine bucket; sqli/nosqli/ssrf/
+// jwt-abuse (Phase 2.3) are the per-detector buckets.
+export const THREAT_STATUSES = [
+    "failed", "locked", "xss", "session-theft", "bot",
+    "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse",
+];
 
 export const UsageRollup = mongoose.model("UsageRollup", usageRollupSchema);

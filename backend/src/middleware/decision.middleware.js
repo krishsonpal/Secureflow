@@ -8,10 +8,14 @@ import { score } from "../detection/scoring.js";
 import { evaluateRules } from "../detection/ruleEngine.js";
 
 // Map the top blocking signal to the APIUsage status used for analytics/rollups.
-// Falls back to the generic "blocked" bucket for detectors that don't have a
-// dedicated status yet (dedicated statuses are added with the detectors in 2.3).
+// Each detector has a dedicated status so the dashboard can categorize blocks;
+// anything unmapped (e.g. a rule-only block) falls back to the generic "blocked".
 const STATUS_FOR_SIGNAL = {
     xss: "xss",
+    sqli: "sqli",
+    nosqli: "nosqli",
+    ssrf: "ssrf",
+    "jwt-abuse": "jwt-abuse",
 };
 
 // Build the evaluation context that rules run against: the fused score, the
@@ -79,6 +83,7 @@ export const decisionMiddleware = asyncHandler(async (req, res, next) => {
     const topReasons = [...ruleReasons, ...decision.topReasons];
     req.decision = { ...decision, finalAction, matchedRules: ruleResult.matched, topReasons };
     res.setHeader("X-SecureFlow-Risk", String(decision.riskScore));
+    res.setHeader("X-SecureFlow-Action", finalAction);
 
     if (finalAction !== "block") {
         // allow (incl. a rule overriding a would-be block) / challenge → continue.
