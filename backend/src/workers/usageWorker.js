@@ -37,20 +37,28 @@ const processEvent = async (fields, emit) => {
     const keyDoc = await ApiKey.findOne({ key: hashToken(obj.apiKey) }).select("projectId organizationId")
     if (!keyDoc) return
 
-    const usage = await APIUsage.create({
+    // Phase 2.1 decision metadata — only present on scored events (empty string
+    // otherwise). Persist only when present so legacy/plain events stay clean.
+    const usageDoc = {
         apiKey: keyDoc._id,
         projectId: keyDoc.projectId,
         organizationId: keyDoc.organizationId,
         fingerprint: obj.fingerprint,
         status: obj.status,
         message: obj.message
-    })
+    }
+    if (obj.riskScore !== undefined && obj.riskScore !== "") usageDoc.riskScore = Number(obj.riskScore)
+    if (obj.action) usageDoc.action = obj.action
+    if (obj.topSignal) usageDoc.topSignal = obj.topSignal
+
+    const usage = await APIUsage.create(usageDoc)
 
     // Maintain the cumulative rollup so the dashboard reads O(1) totals instead
     // of scanning APIUsage. Single atomic upsert; the worker is the sole writer.
     const inc = { totalRequests: 1, [`byStatus.${obj.status}`]: 1 }
     if (THREAT_SET.has(obj.status)) inc.threatsBlocked = 1
     if (obj.status === "rate-limited") inc.rateLimited = 1
+    if (obj.action) inc[`byAction.${obj.action}`] = 1
     await UsageRollup.updateOne(
         { projectId: keyDoc.projectId },
         { $inc: inc, $set: { organizationId: keyDoc.organizationId, lastEventAt: new Date() } },

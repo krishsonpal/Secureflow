@@ -23,12 +23,16 @@ const usageRollupSchema = new Schema(
         rateLimited: { type: Number, default: 0 },
         // Full per-status counts, e.g. { success: 10, xss: 2, "rate-limited": 1 }.
         byStatus: { type: Map, of: Number, default: {} },
+        // Phase 2.1 — per-decision-action counts, e.g. { block: 3, challenge: 1 }.
+        // Only incremented for scored events that carry an `action`.
+        byAction: { type: Map, of: Number, default: {} },
         lastEventAt: { type: Date },
     },
     { timestamps: true }
 );
 
 // Statuses that count as a blocked threat (mirrors the dashboard's definition).
-export const THREAT_STATUSES = ["failed", "locked", "xss", "session-theft", "bot"];
+// "blocked" (Phase 2.1) is the generic decision-engine block bucket.
+export const THREAT_STATUSES = ["failed", "locked", "xss", "session-theft", "bot", "blocked"];
 
 export const UsageRollup = mongoose.model("UsageRollup", usageRollupSchema);

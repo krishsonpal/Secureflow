@@ -1,9 +1,8 @@
 import axios from "axios";
-import { logUsageAsync } from "../utils/logusage.js";
 import { redis } from "../app.js";
 import { hashToken } from "../utils/tokens.js";
 import { CircuitBreaker } from "../utils/circuitBreaker.js";
-import { incSecurityEvent } from "../observability/metrics.js";
+import { addSignal } from "../detection/signal.js";
 
 const ML_TIMEOUT_MS = Number(process.env.ML_TIMEOUT_MS) || 1500;
 const VERDICT_TTL_SECONDS = Number(process.env.XSS_CACHE_TTL) || 300;
@@ -26,19 +25,27 @@ const XSS_FAIL_OPEN = process.env.XSS_FAIL_OPEN !== "false";
 // it for a cooldown and degrade instantly instead of eating the timeout each time.
 const mlBreaker = new CircuitBreaker({ failureThreshold: 5, cooldownMs: 30000, name: "ml-xss" });
 
-const blockAsXSS = async (req, res, details) => {
-    incSecurityEvent("xss_blocked");
-    const { apiKey, fingerprint } = req.body;
-    if (apiKey && fingerprint) {
-        await logUsageAsync(apiKey, fingerprint, "xss", "Malicious payload detected by AI model");
-    }
-    return res.status(403).json({ message: "XSS Detected", details });
+// Phase 2.1: instead of blocking directly, the XSS check now EMITS a signal onto
+// req.signals and always continues; the decision middleware fuses it with any
+// other detector signals and picks the graduated action. A positive ML verdict
+// is authoritative, so the signal carries confidence 1.0 (weight 100 in the
+// scorer → risk 100 → block), reproducing the old binary block behavior while
+// letting future detectors corroborate.
+const emitXSS = (req, evidence) => {
+    addSignal(req, {
+        name: "xss",
+        confidence: 1,
+        evidence,
+        owasp: "API#3", // Broken Object Property Level Authorization / injection-adjacent
+        mitre: "T1059", // Command and Scripting Interpreter
+    });
 };
 
-// Apply the fail policy when the ML verdict is unavailable.
+// Apply the fail policy when the ML verdict is unavailable. Fail-open → emit no
+// signal and continue (unscannable ≠ malicious). Fail-closed → 503.
 const degrade = (res, next, reason) => {
     if (XSS_FAIL_OPEN) {
-        console.warn(`[checkXSS] ${reason} — failing open`);
+        console.warn(`[checkXSS] ${reason} — failing open (no signal)`);
         return next();
     }
     return res.status(503).json({ message: "XSS check unavailable" });
@@ -47,13 +54,13 @@ const degrade = (res, next, reason) => {
 export const checkXSS = async (req, res, next) => {
     const input = req.body.requestdata;
 
-    // Nothing to scan → don't block.
+    // Nothing to scan → no signal.
     if (input === undefined || input === null || input === "") {
         return next();
     }
 
     // Oversized payloads: don't ship them to the ML service. Apply the fail
-    // policy (open by default) rather than blocking legitimate large bodies.
+    // policy (open by default) rather than treating large bodies as malicious.
     if (typeof input === "string" && input.length > ML_MAX_CONTENT_CHARS) {
         return degrade(res, next, `payload exceeds ${ML_MAX_CONTENT_CHARS} chars`);
     }
@@ -64,7 +71,7 @@ export const checkXSS = async (req, res, next) => {
     try {
         const cached = await redis.get(cacheKey);
         if (cached !== null) {
-            if (Number(cached) === 1) return blockAsXSS(req, res, { cached: true });
+            if (Number(cached) === 1) emitXSS(req, { cached: true });
             return next();
         }
     } catch {
@@ -92,7 +99,7 @@ export const checkXSS = async (req, res, next) => {
         redis.set(cacheKey, prediction, "EX", VERDICT_TTL_SECONDS).catch(() => {});
 
         if (prediction === 1) {
-            return blockAsXSS(req, res, response.data);
+            emitXSS(req, response.data);
         }
         return next();
     } catch (error) {

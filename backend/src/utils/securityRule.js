@@ -12,7 +12,28 @@ export const DEFAULT_RULE = Object.freeze({
     blockBots: true,
     banDuration: 2000,
     whitelistips: [],
+    // Empty scoring policy → the scorer applies its own DEFAULT_WEIGHTS /
+    // DEFAULT_THRESHOLDS. Kept as {} (not the concrete numbers) so the scorer
+    // remains the single source of truth for defaults.
+    scoring: {},
 });
+
+// Normalize the optional scoring sub-doc into a plain, JSON-cacheable object.
+// `weights` may arrive as a Mongoose Map (from Mongo) or a plain object (from the
+// Redis JSON cache); either way we hand the scorer a plain object.
+function pickScoring(scoring) {
+    if (!scoring) return {};
+    const out = {};
+    const weights = scoring.weights;
+    if (weights instanceof Map) {
+        if (weights.size > 0) out.weights = Object.fromEntries(weights);
+    } else if (weights && typeof weights === "object") {
+        if (Object.keys(weights).length > 0) out.weights = { ...weights };
+    }
+    if (scoring.blockThreshold != null) out.blockThreshold = scoring.blockThreshold;
+    if (scoring.challengeThreshold != null) out.challengeThreshold = scoring.challengeThreshold;
+    return out;
+}
 
 function pickRule(doc) {
     if (!doc) return { ...DEFAULT_RULE };
@@ -23,6 +44,7 @@ function pickRule(doc) {
         blockBots: doc.blockBots ?? DEFAULT_RULE.blockBots,
         banDuration: doc.banDuration ?? DEFAULT_RULE.banDuration,
         whitelistips: Array.isArray(doc.whitelistips) ? doc.whitelistips : DEFAULT_RULE.whitelistips,
+        scoring: pickScoring(doc.scoring),
     };
 }
 

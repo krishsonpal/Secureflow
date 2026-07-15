@@ -20,6 +20,12 @@ export const publishUsageEvent = async (event = {}) => {
             "fingerprint", event.fingerprint ?? "",
             "status", event.status ?? "",
             "message", event.message ?? "",
+            // Phase 2.1 decision metadata (empty string when the event isn't a
+            // scored decision — every field is optional and the worker only
+            // persists non-empty ones).
+            "riskScore", event.riskScore != null ? String(event.riskScore) : "",
+            "action", event.action ?? "",
+            "topSignal", event.topSignal ?? "",
             "ts", Date.now().toString()
         )
     } catch (e) {

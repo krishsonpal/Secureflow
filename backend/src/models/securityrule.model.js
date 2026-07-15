@@ -42,7 +42,29 @@ const securityRuleSchema = new Schema(
             type : [String],
             default : []
         },
-    
+        // Phase 2.1 — per-tenant detection scoring policy. Consumed by the
+        // decision middleware via the weighted-sum scorer. All optional: absent
+        // fields fall back to the scorer's DEFAULT_WEIGHTS / DEFAULT_THRESHOLDS,
+        // so existing rows keep today's behavior (a full-confidence XSS = risk
+        // 100 ≥ 70 → block).
+        scoring : {
+            // Per-signal contribution at confidence 1.0 (0..100). Overrides the
+            // scorer defaults per detector name, e.g. { "prompt-injection": 90 }.
+            weights : {
+                type : Map,
+                of : Number,
+                default : undefined
+            },
+            blockThreshold : {
+                type : Number,
+                default : undefined
+            },
+            challengeThreshold : {
+                type : Number,
+                default : undefined
+            },
+        },
+
  },
     {
         timestamps : true

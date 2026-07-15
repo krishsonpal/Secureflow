@@ -18,10 +18,17 @@ const apiUsageSchema = new Schema({
     fingerprint: String,
     status: {
         type: String,
-        enum: ["success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot"],
+        // "blocked" (Phase 2.1) = generic decision-engine block for a detector
+        // that doesn't yet have a dedicated status (dedicated ones added in 2.3).
+        enum: ["success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot", "blocked"],
         default: "success"
     },
-    message: String
+    message: String,
+    // Phase 2.1 — decision-engine outcome. Present on scored requests; absent on
+    // legacy/plain events. `topSignal` is the highest-contributing detector.
+    riskScore: { type: Number },
+    action: { type: String, enum: ["allow", "challenge", "block"] },
+    topSignal: { type: String }
 }, { timestamps: true });
 
 // Analytics hot paths on the (unindexed until now) usage collection:
