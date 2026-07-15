@@ -86,7 +86,24 @@ export function getProvider() {
     return singleton;
 }
 
-/** Test hook: drop the singleton so the next getProvider() rebuilds from env. */
+let embedSingleton;
+
+/**
+ * A SINGLE embedding provider instance (not the chain). Embeddings are only
+ * comparable within one provider (dims differ), so similarity consumers (the 2.5
+ * template bank) must use one consistent embedder for both the bank and the
+ * query. Uses AI_PROVIDER (default ollama); if that provider's embed fails at
+ * call time the consumer treats it as best-effort/advisory and skips.
+ */
+export function getEmbedProvider() {
+    if (!embedSingleton) {
+        embedSingleton = createProvider((process.env.AI_PROVIDER || "ollama").toLowerCase());
+    }
+    return embedSingleton;
+}
+
+/** Test hook: drop the singletons so the next get*Provider() rebuilds from env. */
 export function _resetProvider() {
     singleton = undefined;
+    embedSingleton = undefined;
 }

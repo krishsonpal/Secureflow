@@ -16,6 +16,7 @@ const STATUS_FOR_SIGNAL = {
     nosqli: "nosqli",
     ssrf: "ssrf",
     "jwt-abuse": "jwt-abuse",
+    "prompt-injection": "prompt-injection",
 };
 
 // Build the evaluation context that rules run against: the fused score, the

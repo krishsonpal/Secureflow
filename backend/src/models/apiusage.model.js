@@ -22,7 +22,7 @@ const apiUsageSchema = new Schema({
         // sqli/nosqli/ssrf/jwt-abuse (Phase 2.3) are the per-detector block buckets.
         enum: [
             "success", "failed", "locked", "rate-limited", "xss", "session-theft", "bot",
-            "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse",
+            "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse", "prompt-injection",
         ],
         default: "success"
     },

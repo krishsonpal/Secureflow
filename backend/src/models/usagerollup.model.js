@@ -36,7 +36,7 @@ const usageRollupSchema = new Schema(
 // jwt-abuse (Phase 2.3) are the per-detector buckets.
 export const THREAT_STATUSES = [
     "failed", "locked", "xss", "session-theft", "bot",
-    "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse",
+    "blocked", "sqli", "nosqli", "ssrf", "jwt-abuse", "prompt-injection",
 ];
 
 export const UsageRollup = mongoose.model("UsageRollup", usageRollupSchema);
