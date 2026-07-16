@@ -28,7 +28,8 @@
   "scripts": {
     "start": "node src/index.js",
     "worker": "node src/workers/index.js",
-    "backfill:tenancy": "node scripts/backfill-tenancy.js"
+    "backfill:tenancy": "node scripts/backfill-tenancy.js",
+    "test:rbac": "node scripts/test-rbac.js"
   },
   "author": "krish sonpal",
   "license": "ISC"
