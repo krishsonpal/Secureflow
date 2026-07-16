@@ -5,6 +5,7 @@ import connectDB from "../db/index.js"
 import { startUsageWorker } from "./usageWorker.js"
 import { startThreatIntelWorker } from "./threatIntelWorker.js"
 import { startFeedIngestWorker } from "./feedIngestWorker.js"
+import { startAlertWorker } from "./alertWorker.js"
 import { initGeo } from "../detection/geo.js"
 import { createRedisEmitter } from "../utils/socketEmitter.js"
 
@@ -19,7 +20,9 @@ connectDB()
         await initGeo().catch((e) => console.error("[geo] init failed:", e?.message || e))
         await startThreatIntelWorker()
         startFeedIngestWorker()
-        console.log("[worker] standalone usage + threat-intel workers running (with cross-process emit)")
+        // Phase 3.7 — alerting consumer (3rd group on stream:usage).
+        await startAlertWorker(emit)
+        console.log("[worker] standalone usage + threat-intel + alert workers running (with cross-process emit)")
     })
     .catch((err) => {
         console.error("[worker] failed to start:", err?.message || err)

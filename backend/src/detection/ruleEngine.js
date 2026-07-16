@@ -81,6 +81,20 @@ export function evaluateRules(rules = [], ctx = {}) {
 }
 
 /**
+ * Single-rule condition test (Phase 3.6 alerting). Same safe evaluator as
+ * evaluateRules, exposed for callers that check one rule's conditions at a time
+ * (the alert worker fires EVERY matching rule, not just the highest-priority one).
+ * Never throws — a malformed tree is simply "no match".
+ */
+export function matchesRule(conditions, ctx = {}) {
+    try {
+        return evaluateNode(conditions, ctx, 0);
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Structurally validate a condition tree at write time. Returns an error string,
  * or null if valid. Keeps malformed rules out of the store and gives the admin
  * useful feedback (e.g. unsupported operator).

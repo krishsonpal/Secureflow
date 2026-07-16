@@ -6,6 +6,7 @@ import { initSocket, getIO } from "./socket.js"
 import { startUsageWorker } from "./workers/usageWorker.js"
 import { startThreatIntelWorker } from "./workers/threatIntelWorker.js"
 import { startFeedIngestWorker } from "./workers/feedIngestWorker.js"
+import { startAlertWorker } from "./workers/alertWorker.js"
 import { initGeo } from "./detection/geo.js"
 
 dotenv.config({
@@ -38,6 +39,9 @@ connectDB().then(
         initGeo().catch((e) => console.error("[geo] init failed:", e?.message || e))
         startThreatIntelWorker()
         startFeedIngestWorker()
+        // Phase 3.7 — alerting consumer (3rd group on stream:usage); pushes new
+        // alerts to the project's dashboard room too (same emitter as usage).
+        startAlertWorker((room, payload) => getIO().to(room).emit("dashboard-update", payload))
 
         server.listen(process.env.PORT || 3000,() =>
             console.log("connection made successfully on port", process.env.PORT || 3000)

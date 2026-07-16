@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer"
 import { APIError } from "./apierror.js"
 
-const sendEmail = async (email, message) => {
+const sendEmail = async (email, message, subject = "Important") => {
     try {
 
         const transporter = nodemailer.createTransport({
@@ -18,7 +18,7 @@ const sendEmail = async (email, message) => {
         await transporter.sendMail({
             from: process.env.SMTP_FROM,
             to: email,
-            subject: "Important",
+            subject,
             text: message
         })
 
