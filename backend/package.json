@@ -32,7 +32,8 @@
     "test:rbac": "node scripts/test-rbac.js",
     "test:isolation": "node scripts/test-tenant-isolation.js",
     "test:management": "node scripts/test-management-api.js",
-    "test:alerts": "node scripts/test-alerts.js"
+    "test:alerts": "node scripts/test-alerts.js",
+    "test:alert-api": "node scripts/test-alert-api.js"
   },
   "author": "krish sonpal",
   "license": "ISC"
