@@ -7,6 +7,8 @@ import Register from './pages/Register';
 import LiveTraffic from './pages/LiveTraffic';
 import ThreatAnalysis from './pages/ThreatAnalysis';
 import Settings from './pages/Settings';
+import Organization from './pages/Organization';
+import AcceptInvite from './pages/AcceptInvite';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
@@ -42,6 +44,8 @@ function AppRoutes() {
       <Route path="/live-traffic" element={<ProtectedRoute><LiveTraffic /></ProtectedRoute>} />
       <Route path="/threat-analysis" element={<ProtectedRoute><ThreatAnalysis /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="/organization" element={<ProtectedRoute><Organization /></ProtectedRoute>} />
+      <Route path="/invite" element={<ProtectedRoute><AcceptInvite /></ProtectedRoute>} />
     </Routes>
   );
 }
