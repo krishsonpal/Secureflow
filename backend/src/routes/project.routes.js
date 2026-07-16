@@ -12,18 +12,25 @@ import {
     updateDetectionRules
 } from "../controllers/project.controller.js"
 import { verifyJWT } from "../middleware/auth.middleware.js"
+import { authorize } from "../middleware/authorize.js"
 
 const router = Router()
 
-// All project routes require an authenticated dashboard user.
+// All project routes require an authenticated dashboard user. authorize() then
+// resolves the target's tenant scope + checks the caller's membership grants
+// (Phase 3.3); controllers read req.tenant and query through tenantRepo.
 router.use(verifyJWT)
 
-router.route("/create-project").post(createNewProject)
-router.route("/delete-project").delete(deleteProject)
-router.route("/my-projects").get(getMyProjects)
-router.route("/:projectId/analytics").get(getProjectAnalytics)
-router.route("/:projectId/timeseries").get(getProjectTimeseries)
-router.route("/:projectId/security-rule").get(getSecurityRule).put(updateSecurityRule)
-router.route("/:projectId/rules").get(getDetectionRules).put(updateDetectionRules)
+router.route("/create-project").post(authorize("project", "create"), createNewProject)
+router.route("/delete-project").delete(authorize("project", "delete"), deleteProject)
+router.route("/my-projects").get(authorize("project", "read"), getMyProjects)
+router.route("/:projectId/analytics").get(authorize("analytics", "read"), getProjectAnalytics)
+router.route("/:projectId/timeseries").get(authorize("analytics", "read"), getProjectTimeseries)
+router.route("/:projectId/security-rule")
+    .get(authorize("rule", "read"), getSecurityRule)
+    .put(authorize("rule", "update"), updateSecurityRule)
+router.route("/:projectId/rules")
+    .get(authorize("rule", "read"), getDetectionRules)
+    .put(authorize("rule", "update"), updateDetectionRules)
 
 export default router

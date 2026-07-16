@@ -171,10 +171,11 @@ async function tenantStampModels() {
         "../src/models/usagerollup.model.js",
         "../src/models/detectionrule.model.js",
         "../src/models/clientuser.model.js",
+        "../src/models/securityrule.model.js",
     ]) {
         try {
             const m = await import(path)
-            const model = m.APIUsage || m.UsageRollup || m.DetectionRule || m.ClientUser ||
+            const model = m.APIUsage || m.UsageRollup || m.DetectionRule || m.ClientUser || m.SecurityRule ||
                 m[Object.keys(m).find((k) => m[k]?.modelName)]
             if (model) mods.push(model)
         } catch { /* optional */ }

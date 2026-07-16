@@ -16,6 +16,14 @@ const securityRuleSchema = new Schema(
             unique : true,
             sparse : true
         },
+        // Tenant key (Phase 3.3) — so this row is filterable by tenantRepo like
+        // every other collection (doc 04 §Cap1). The hot-path load is still by
+        // projectId; this is for org-scoped management reads / defense-in-depth.
+        organizationId : {
+            type : Schema.Types.ObjectId,
+            ref : "Organization",
+            index : true
+        },
         rateLimit : {
             type : Number,
             default : 100

@@ -2,6 +2,9 @@ import { APIResponse } from "../utils/apiresponse.js";
 import { APIError } from "../utils/apierror.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Project } from "../models/project.model.js";
+import { Team } from "../models/team.model.js";
+import { Environment } from "../models/environment.model.js";
+import { ApiKey } from "../models/apikey.model.js";
 
 import { APIUsage } from "../models/apiusage.model.js";
 import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js";
@@ -10,32 +13,30 @@ import { loadSecurityRule, invalidateSecurityRule } from "../utils/securityRule.
 import { DetectionRule } from "../models/detectionrule.model.js";
 import { invalidateRules } from "../utils/detectionRules.js";
 import { validateConditions } from "../detection/ruleEngine.js";
+import { tenantRepo, tenantOrgId } from "../utils/tenantScope.js";
 
-// Assert the project belongs to the authenticated user; returns the project or
-// throws 404. Shared by the analytics/timeseries/security-rule endpoints.
-const assertOwnedProject = async (projectId, userId) => {
-    if (!projectId) throw new APIError(400, "ProjectId is missing")
-    const project = await Project.findOne({ _id: projectId, userId })
-    if (!project) throw new APIError(404, "Project not found or unauthorized")
-    return project
-}
+// Phase 3.3 — access is now org+membership based, enforced by authorize() on the
+// route (which resolves the project's tenant, verifies the caller has a covering
+// grant, and caches the resolved scope on req.tenant). Controllers no longer do
+// userId-ownership checks; they read req.tenant and query through tenantRepo so
+// every read/write is scoped to the tenant by construction.
 
-// Read the cumulative rollup for a project. If it doesn't exist yet (project
-// predates Part 1.8, or has never been rolled up), backfill it once from the
-// APIUsage collection so the numbers are correct and every later read is O(1).
-// The worker is the steady-state writer; this is a one-time self-heal.
-const getOrBackfillRollup = async (projectId) => {
-    const existing = await UsageRollup.findOne({ projectId })
+// Read the cumulative rollup for a project. If it doesn't exist yet, backfill it
+// once from APIUsage so the numbers are correct and later reads are O(1). All
+// queries are tenant-scoped.
+const getOrBackfillRollup = async (req, projectId) => {
+    const existing = await tenantRepo(req, UsageRollup).findOne({ projectId })
     if (existing) return existing
 
     const [totalRequests, threatsBlocked, rateLimited] = await Promise.all([
-        APIUsage.countDocuments({ projectId }),
-        APIUsage.countDocuments({ projectId, status: { $in: THREAT_STATUSES } }),
-        APIUsage.countDocuments({ projectId, status: "rate-limited" }),
+        tenantRepo(req, APIUsage).countDocuments({ projectId }),
+        tenantRepo(req, APIUsage).countDocuments({ projectId, status: { $in: THREAT_STATUSES } }),
+        tenantRepo(req, APIUsage).countDocuments({ projectId, status: "rate-limited" }),
     ])
 
     // $setOnInsert so a concurrent worker $inc (upsert) doesn't get clobbered.
-    await UsageRollup.updateOne(
+    // organizationId is injected into the filter by tenantRepo → seeded on insert.
+    await tenantRepo(req, UsageRollup).updateOne(
         { projectId },
         { $setOnInsert: { projectId, totalRequests, threatsBlocked, rateLimited } },
         { upsert: true }
@@ -43,36 +44,33 @@ const getOrBackfillRollup = async (projectId) => {
     return { totalRequests, threatsBlocked, rateLimited }
 }
 
-// NOTE: auth is now handled by the shared `verifyJWT` middleware, which
-// populates `req.user`. Controllers no longer re-implement jwt.verify or wrap
-// everything in a try/catch that mislabels real 500s as 401/501.
-
 const createNewProject = asyncHandler(async (req, res) => {
     const { projectName, description } = req.body || {}
+    if (!projectName) throw new APIError(400, "Project name is required")
 
-    if (!projectName) {
-        throw new APIError(400, "Project name is required")
-    }
+    const organizationId = tenantOrgId(req)
 
-    const existedProject = await Project.findOne({
-        userId: req.user._id,
-        projectName
-    })
-    if (existedProject) {
-        throw new APIError(409, "Project already exists")
-    }
+    const existedProject = await tenantRepo(req, Project).findOne({ projectName })
+    if (existedProject) throw new APIError(409, "Project already exists")
+
+    // Strict tree: every project belongs to a team. Land it in the org's default
+    // team (self-heal if somehow absent — an org should always have one).
+    const team = await Team.findOne({ organizationId, isDefault: true })
+        || await Team.create({ organizationId, name: "Default", isDefault: true })
 
     const project = await Project.create({
         userId: req.user._id,
-        organizationId: req.user.organizationId,
+        organizationId,
+        teamId: team._id,
         projectName,
         description: description || ""
     })
 
+    // Default environment so API keys can be scoped immediately.
+    await Environment.create({ projectId: project._id, organizationId, name: "production", isDefault: true })
+
     const createdProject = await Project.findById(project._id).select("-userId")
-    if (!createdProject) {
-        throw new APIError(500, "Something went wrong while creating Project")
-    }
+    if (!createdProject) throw new APIError(500, "Something went wrong while creating Project")
 
     return res
         .status(201)
@@ -81,18 +79,18 @@ const createNewProject = asyncHandler(async (req, res) => {
 
 const deleteProject = asyncHandler(async (req, res) => {
     const { projectId } = req.body
+    if (!projectId) throw new APIError(400, "Project id is required")
 
-    if (!projectId) {
-        throw new APIError(400, "Project id is required")
-    }
+    // authorize() already verified project:delete on this project within the
+    // caller's org. The tenant-scoped delete is the enforcement backstop.
+    const result = await tenantRepo(req, Project).deleteOne({ _id: projectId })
+    if (!result.deletedCount) throw new APIError(404, "Project not found or unauthorized")
 
-    // Ownership check — previously this deleted by id with no owner check.
-    const project = await Project.findOne({ _id: projectId, userId: req.user._id })
-    if (!project) {
-        throw new APIError(404, "Project not found or unauthorized")
-    }
-
-    await Project.findByIdAndDelete(projectId)
+    // Scoped cascade — don't orphan the project's environments / keys.
+    await Promise.all([
+        tenantRepo(req, Environment).deleteMany({ projectId }),
+        tenantRepo(req, ApiKey).deleteMany({ projectId }),
+    ])
 
     return res
         .status(200)
@@ -100,43 +98,30 @@ const deleteProject = asyncHandler(async (req, res) => {
 })
 
 const getMyProjects = asyncHandler(async (req, res) => {
-    const projects = await Project.find({ userId: req.user._id })
+    // Every project in the caller's org (they hold project:read at org scope).
+    const projects = await tenantRepo(req, Project).find({})
     return res
         .status(200)
         .json(new APIResponse(200, projects, "Projects fetched successfully"))
 })
 
 const getProjectAnalytics = asyncHandler(async (req, res) => {
-    const { projectId } = req.params
+    const project = req.tenant.project // resolved + authorized by authorize()
+    const projectId = project._id
 
-    if (!projectId) {
-        throw new APIError(400, "ProjectId is missing")
-    }
-
-    // Verify project belongs to the authenticated user
-    const project = await Project.findOne({ _id: projectId, userId: req.user._id })
-    if (!project) {
-        throw new APIError(404, "Project not found or unauthorized")
-    }
-
-    // Part 1.8: totals come from the O(1) rollup (no full-collection scan); the
-    // rollup read, the live "active sessions" window, and the recent-logs query
-    // are independent, so run them concurrently instead of sequentially.
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
     const [rollup, activeSessionsResult, recentLogs] = await Promise.all([
-        getOrBackfillRollup(projectId),
-        APIUsage.aggregate([
-            { $match: { projectId: project._id, createdAt: { $gte: oneHourAgo } } },
+        getOrBackfillRollup(req, projectId),
+        tenantRepo(req, APIUsage).aggregate([
+            { $match: { projectId, createdAt: { $gte: oneHourAgo } } },
             { $group: { _id: "$fingerprint" } },
             { $count: "uniqueSessions" }
         ]),
-        APIUsage.find({ projectId }).sort({ createdAt: -1 }).limit(50)
+        tenantRepo(req, APIUsage).find({ projectId }).sort({ createdAt: -1 }).limit(50)
     ])
 
     const activeSessions = activeSessionsResult.length > 0 ? activeSessionsResult[0].uniqueSessions : 0
 
-    // byStatus is a Mongo Map on a hydrated rollup; normalize to a plain object
-    // (absent on the lazy-backfill path).
     const byStatus = rollup.byStatus instanceof Map
         ? Object.fromEntries(rollup.byStatus)
         : (rollup.byStatus || {})
@@ -156,25 +141,22 @@ const getProjectAnalytics = asyncHandler(async (req, res) => {
 })
 
 // Real trend data: bucket APIUsage over a window so the dashboard chart shows
-// actual history instead of only live-accumulated points. ?hours=24 (default),
-// ?buckets=24 → one point per hour. Threats counted alongside total requests.
+// actual history. ?hours=24 (default), ?buckets=24 → one point per hour.
 const getProjectTimeseries = asyncHandler(async (req, res) => {
-    const { projectId } = req.params
-    const project = await assertOwnedProject(projectId, req.user._id)
+    const project = req.tenant.project
+    const projectId = project._id
 
     const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168) // cap 7d
     const buckets = Math.min(Math.max(Number(req.query.buckets) || hours, 1), 168)
     const windowMs = hours * 60 * 60 * 1000
-    const bucketMs = Math.floor(windowMs / buckets) // integer ms so bucket keys align
+    const bucketMs = Math.floor(windowMs / buckets)
 
-    // Anchor the LAST bucket on the current bucket so freshly-created events (which
-    // land in "now"'s bucket) are included; walk back `buckets-1` steps for the start.
     const endBucket = Math.floor(Date.now() / bucketMs) * bucketMs
     const startBucket = endBucket - (buckets - 1) * bucketMs
     const since = new Date(startBucket)
 
-    const rows = await APIUsage.aggregate([
-        { $match: { projectId: project._id, createdAt: { $gte: since } } },
+    const rows = await tenantRepo(req, APIUsage).aggregate([
+        { $match: { projectId, createdAt: { $gte: since } } },
         {
             $group: {
                 _id: {
@@ -192,7 +174,6 @@ const getProjectTimeseries = asyncHandler(async (req, res) => {
         { $sort: { _id: 1 } }
     ])
 
-    // Fill empty buckets so the chart has a continuous X axis.
     const byBucket = new Map(rows.map((r) => [Number(r._id), r]))
     const series = []
     for (let i = 0; i < buckets; i++) {
@@ -211,18 +192,17 @@ const getProjectTimeseries = asyncHandler(async (req, res) => {
 })
 
 // Read the project's SecurityRule (falls back to defaults if none set yet).
+// projectId is server-trusted here — authorize() validated it belongs to the
+// caller's org before this runs — so the cached loader-by-projectId is safe.
 const getSecurityRule = asyncHandler(async (req, res) => {
-    await assertOwnedProject(req.params.projectId, req.user._id)
     const rule = await loadSecurityRule(req.params.projectId)
     return res.status(200).json(new APIResponse(200, rule, "Security rule fetched"))
 })
 
 // Create/update the project's SecurityRule and invalidate the cached copy so the
-// rate limiter picks up the change immediately. (Closes the Part 1.6 deferred
-// admin-route item.)
+// rate limiter picks up the change immediately.
 const updateSecurityRule = asyncHandler(async (req, res) => {
     const { projectId } = req.params
-    await assertOwnedProject(projectId, req.user._id)
 
     const allowed = ["rateLimit", "rateWindow", "otpLimit", "blockBots", "banDuration", "whitelistips"]
     const update = {}
@@ -238,7 +218,7 @@ const updateSecurityRule = asyncHandler(async (req, res) => {
         }
     }
 
-    const rule = await SecurityRule.findOneAndUpdate(
+    const rule = await tenantRepo(req, SecurityRule).findOneAndUpdate(
         { projectId },
         { $set: { projectId, ...update } },
         { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -250,20 +230,17 @@ const updateSecurityRule = asyncHandler(async (req, res) => {
 
 // --- Detection rules (Phase 2.2) -------------------------------------------
 
-// List the project's detection rules (priority desc).
 const getDetectionRules = asyncHandler(async (req, res) => {
-    await assertOwnedProject(req.params.projectId, req.user._id)
-    const rules = await DetectionRule.find({ projectId: req.params.projectId }).sort({ priority: -1 })
+    const rules = await tenantRepo(req, DetectionRule).find({ projectId: req.params.projectId }).sort({ priority: -1 })
     return res.status(200).json(new APIResponse(200, rules, "Detection rules fetched"))
 })
 
-// Replace the project's entire detection-rule set (the visual builder / editor
-// PUTs the full array). Each rule is validated + normalized; the condition tree
-// is structurally checked so malformed rules never reach the hot path. Publishes
-// an invalidation so every process hot-reloads without a restart.
+// Replace the project's entire detection-rule set (the visual builder PUTs the
+// full array). Each rule is validated + normalized; publishes an invalidation so
+// every process hot-reloads without a restart.
 const updateDetectionRules = asyncHandler(async (req, res) => {
     const { projectId } = req.params
-    const project = await assertOwnedProject(projectId, req.user._id)
+    const organizationId = tenantOrgId(req)
 
     const input = Array.isArray(req.body?.rules) ? req.body.rules : null
     if (!input) throw new APIError(400, "Body must be { rules: [...] }")
@@ -277,7 +254,7 @@ const updateDetectionRules = asyncHandler(async (req, res) => {
         const action = ["allow", "log", "challenge", "block"].includes(r.action) ? r.action : "block"
         return {
             projectId,
-            organizationId: project.organizationId,
+            organizationId,
             name: r.name.trim(),
             description: typeof r.description === "string" ? r.description : "",
             priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 0,
@@ -288,7 +265,7 @@ const updateDetectionRules = asyncHandler(async (req, res) => {
     })
 
     // Replace-all semantics keep the store in sync with the editor's view.
-    await DetectionRule.deleteMany({ projectId })
+    await tenantRepo(req, DetectionRule).deleteMany({ projectId })
     const created = docs.length ? await DetectionRule.insertMany(docs) : []
     await invalidateRules(projectId)
 

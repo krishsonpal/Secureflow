@@ -50,17 +50,17 @@ const membershipSchema = new Schema(
 );
 
 // Keep scope fields consistent with scopeType so resolution never has to guess.
-membershipSchema.pre("validate", function (next) {
+// Sync pre-validate hook (throws on bad input) — no next() callback.
+membershipSchema.pre("validate", function () {
     if (this.scopeType === "org") {
         this.teamId = null
         this.projectId = null
     } else if (this.scopeType === "team") {
         this.projectId = null
-        if (!this.teamId) return next(new Error("team-scoped membership needs teamId"))
+        if (!this.teamId) throw new Error("team-scoped membership needs teamId")
     } else if (this.scopeType === "project") {
-        if (!this.projectId) return next(new Error("project-scoped membership needs projectId"))
+        if (!this.projectId) throw new Error("project-scoped membership needs projectId")
     }
-    next()
 })
 
 // Fast "what can this user do in this org" lookup (the hot path for authorize()).
