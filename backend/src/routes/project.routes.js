@@ -11,6 +11,11 @@ import {
     getDetectionRules,
     updateDetectionRules
 } from "../controllers/project.controller.js"
+import {
+    createEnvironment,
+    listEnvironments,
+    deleteEnvironment
+} from "../controllers/environment.controller.js"
 import { verifyJWT } from "../middleware/auth.middleware.js"
 import { authorize } from "../middleware/authorize.js"
 
@@ -32,5 +37,12 @@ router.route("/:projectId/security-rule")
 router.route("/:projectId/rules")
     .get(authorize("rule", "read"), getDetectionRules)
     .put(authorize("rule", "update"), updateDetectionRules)
+
+// Environments (Phase 3.4) — scoped under a project.
+router.route("/:projectId/environments")
+    .get(authorize("environment", "read"), listEnvironments)
+    .post(authorize("environment", "create"), createEnvironment)
+router.route("/:projectId/environments/:envId")
+    .delete(authorize("environment", "delete"), deleteEnvironment)
 
 export default router

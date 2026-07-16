@@ -28,6 +28,11 @@ async function resolveTarget(req) {
     return { organizationId }
 }
 
+// Explicit org-scope resolver for routes whose BODY carries teamId/projectId as
+// grant-scope params (member invite / role change) — there, the target is the
+// org in the path, NOT a project referenced in the body. Pass as resolveScope.
+export const orgScope = (req) => ({ organizationId: req.params?.orgId })
+
 // authorize(resource, action, { resolveScope? }) — use AFTER verifyJWT.
 // Fail-closed: no user, no resolvable org, or no covering grant ⇒ deny.
 export const authorize = (resource, action, options = {}) =>
@@ -48,6 +53,9 @@ export const authorize = (resource, action, options = {}) =>
         if (!hasPermission(memberships, resource, action, target)) {
             throw new APIError(403, `Forbidden: missing ${resource}:${action}`)
         }
+        // Expose the caller's grants for controllers that reason about them
+        // (e.g. owner-only role grants in member management).
+        req.memberships = memberships
         next()
     })
 

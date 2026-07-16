@@ -9,6 +9,7 @@ import userRouter from "./routes/user.routes.js"
 import projectRouter from "./routes/project.routes.js"
 import apirouter from "./routes/apikey.routes.js"
 import servicerouter from "./routes/bonding.routes.js"
+import orgRouter from "./routes/org.routes.js"
 import { globalRateLimit } from "./middleware/globalRateLimit.middleware.js"
 import { correlationId, requestObserver } from "./middleware/observability.middleware.js"
 import { registry, metricsContentType } from "./observability/metrics.js"
@@ -100,6 +101,7 @@ app.use("/api/v1/users", userRouter)
 app.use("/api/v1/projects",projectRouter)
 app.use("/api/v1/apikey",apirouter)
 app.use("/api/v1/service",servicerouter)
+app.use("/api/v1/orgs",orgRouter)
 
 
 // --- Global error handler ---

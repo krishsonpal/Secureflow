@@ -30,7 +30,8 @@
     "worker": "node src/workers/index.js",
     "backfill:tenancy": "node scripts/backfill-tenancy.js",
     "test:rbac": "node scripts/test-rbac.js",
-    "test:isolation": "node scripts/test-tenant-isolation.js"
+    "test:isolation": "node scripts/test-tenant-isolation.js",
+    "test:management": "node scripts/test-management-api.js"
   },
   "author": "krish sonpal",
   "license": "ISC"
