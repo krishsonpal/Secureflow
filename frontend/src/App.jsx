@@ -9,6 +9,7 @@ import ThreatAnalysis from './pages/ThreatAnalysis';
 import Settings from './pages/Settings';
 import Organization from './pages/Organization';
 import AcceptInvite from './pages/AcceptInvite';
+import Alerts from './pages/Alerts';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
@@ -45,6 +46,7 @@ function AppRoutes() {
       <Route path="/threat-analysis" element={<ProtectedRoute><ThreatAnalysis /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/organization" element={<ProtectedRoute><Organization /></ProtectedRoute>} />
+      <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
       <Route path="/invite" element={<ProtectedRoute><AcceptInvite /></ProtectedRoute>} />
     </Routes>
   );

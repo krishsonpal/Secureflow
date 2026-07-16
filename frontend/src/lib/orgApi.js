@@ -33,6 +33,27 @@ export const orgApi = {
   listEnvironments: (projectId) => axios.get(`${API_URL}/projects/${projectId}/environments`, cfg).then(unwrap).catch(fail),
   createEnvironment: (projectId, name) => axios.post(`${API_URL}/projects/${projectId}/environments`, { name }, cfg).then(unwrap).catch(fail),
   createApiKey: (projectId, environmentId) => axios.post(`${API_URL}/apikey/create-new-apikey`, { projectId, environmentId }, cfg).then(unwrap).catch(fail),
+
+  // Alerting (Phase 3.9) — all org-scoped.
+  listAlerts: (orgId, params = {}) => axios.get(`${API_URL}/orgs/${orgId}/alerts`, { ...cfg, params }).then(unwrap).catch(fail),
+  ackAlert: (orgId, alertId) => axios.patch(`${API_URL}/orgs/${orgId}/alerts/${alertId}/ack`, {}, cfg).then(unwrap).catch(fail),
+  resolveAlert: (orgId, alertId) => axios.patch(`${API_URL}/orgs/${orgId}/alerts/${alertId}/resolve`, {}, cfg).then(unwrap).catch(fail),
+
+  listAlertChannels: (orgId) => axios.get(`${API_URL}/orgs/${orgId}/alert-channels`, cfg).then(unwrap).catch(fail),
+  createAlertChannel: (orgId, body) => axios.post(`${API_URL}/orgs/${orgId}/alert-channels`, body, cfg).then(unwrap).catch(fail),
+  deleteAlertChannel: (orgId, id) => axios.delete(`${API_URL}/orgs/${orgId}/alert-channels/${id}`, cfg).then(unwrap).catch(fail),
+  testAlertChannel: (orgId, id) => axios.post(`${API_URL}/orgs/${orgId}/alert-channels/${id}/test`, {}, cfg).then(unwrap).catch(fail),
+
+  listAlertRules: (orgId) => axios.get(`${API_URL}/orgs/${orgId}/alert-rules`, cfg).then(unwrap).catch(fail),
+  createAlertRule: (orgId, body) => axios.post(`${API_URL}/orgs/${orgId}/alert-rules`, body, cfg).then(unwrap).catch(fail),
+  updateAlertRule: (orgId, id, body) => axios.patch(`${API_URL}/orgs/${orgId}/alert-rules/${id}`, body, cfg).then(unwrap).catch(fail),
+  deleteAlertRule: (orgId, id) => axios.delete(`${API_URL}/orgs/${orgId}/alert-rules/${id}`, cfg).then(unwrap).catch(fail),
 };
 
 export const ROLE_OPTIONS = ['owner', 'admin', 'security-analyst', 'developer', 'read-only', 'billing'];
+
+// Threat statuses an alert rule can match on (mirror of backend THREAT_STATUSES).
+export const THREAT_STATUS_OPTIONS = [
+  'failed', 'locked', 'xss', 'session-theft', 'bot', 'blocked',
+  'sqli', 'nosqli', 'ssrf', 'jwt-abuse', 'prompt-injection', 'reputation', 'impossible-travel',
+];
