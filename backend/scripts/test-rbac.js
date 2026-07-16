@@ -23,6 +23,12 @@ ok(roleAllows("security-analyst", "rule", "update"), "analyst tunes rules")
 ok(!roleAllows("security-analyst", "member", "create"), "analyst cannot invite members")
 ok(roleAllows("billing", "billing", "update") && !roleAllows("billing", "project", "read"), "billing role is billing-only (+org:read)")
 
+// alert resource (Phase 3.6)
+ok(roleAllows("security-analyst", "alert", "create") && roleAllows("security-analyst", "alert", "delete"), "analyst has alert:*")
+ok(roleAllows("admin", "alert", "update"), "admin has alert:*")
+ok(roleAllows("developer", "alert", "read") && !roleAllows("developer", "alert", "create"), "developer alert:read only")
+ok(roleAllows("read-only", "alert", "read") && !roleAllows("read-only", "alert", "update"), "read-only alert:read only")
+
 // --- scope coverage ---------------------------------------------------------
 ok(membershipCoversTarget(g("admin", "org"), projTarget), "org grant covers a project target")
 ok(membershipCoversTarget(g("admin", "team", { teamId: TA }), projTarget), "team grant covers project in that team")

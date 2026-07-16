@@ -7,12 +7,13 @@ import { ROLES } from "./roles.js"
 // across a user's grants; it never collapses to one "winning" role.
 //
 // Resources: org, team, project, environment, apikey, member, rule, analytics,
-//            threat, billing.
+//            threat, alert, billing.
 // Actions:   read, create, update, delete.
 
 const ALL_READ = [
     "org:read", "team:read", "project:read", "environment:read",
     "apikey:read", "member:read", "rule:read", "analytics:read", "threat:read",
+    "alert:read",
 ]
 
 export const ROLE_PERMISSIONS = Object.freeze({
@@ -23,23 +24,23 @@ export const ROLE_PERMISSIONS = Object.freeze({
     admin: new Set([
         "org:read", "org:update",
         "team:*", "project:*", "environment:*", "apikey:*",
-        "member:*", "rule:*",
+        "member:*", "rule:*", "alert:*",
         "analytics:read", "threat:*",
     ]),
 
-    // Reads the platform; owns threat + detection-rule tuning. No member mgmt,
-    // no project/team/key lifecycle, no billing.
+    // Reads the platform; owns threat + detection-rule + alert tuning. No member
+    // mgmt, no project/team/key lifecycle, no billing.
     "security-analyst": new Set([
         ...ALL_READ,
-        "rule:*", "threat:*",
+        "rule:*", "threat:*", "alert:*",
     ]),
 
-    // Builds: manage projects/environments/keys/rules; read analytics/threats.
+    // Builds: manage projects/environments/keys/rules; read analytics/threats/alerts.
     // No member mgmt, no team lifecycle, no billing.
     developer: new Set([
         "org:read", "team:read",
         "project:*", "environment:*", "apikey:*", "rule:*",
-        "analytics:read", "threat:read",
+        "analytics:read", "threat:read", "alert:read",
     ]),
 
     // Sees everything in scope, changes nothing.
