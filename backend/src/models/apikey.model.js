@@ -28,6 +28,14 @@ const apikeySchema = new Schema(
             ref : "Project",
             required : true,
         },
+        // Environment this key is scoped to (Phase 3.1). Nullable pre-backfill,
+        // then always set (backfill assigns the project's default env; key
+        // creation picks one going forward). env→project→org must resolve.
+        environmentId : {
+            type : Schema.Types.ObjectId,
+            ref : "Environment",
+            index : true
+        },
         // permissions : {
         //     type : String,
         //     enum : [""]

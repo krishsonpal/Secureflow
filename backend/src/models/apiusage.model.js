@@ -41,5 +41,8 @@ const apiUsageSchema = new Schema({
 //  - find({ projectId }).sort({ createdAt:-1 }).limit(50) → project + createdAt index
 apiUsageSchema.index({ projectId: 1, status: 1, createdAt: -1 });
 apiUsageSchema.index({ projectId: 1, createdAt: -1 });
+// Phase 3.1 — tenant-scoped analytics (org-wide, across a tenant's projects).
+// Supports the org+project filtered reads the isolation layer (3.3) produces.
+apiUsageSchema.index({ organizationId: 1, projectId: 1, status: 1, createdAt: -1 });
 
 export const APIUsage = mongoose.model("APIUsage", apiUsageSchema);
