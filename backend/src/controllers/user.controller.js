@@ -2,7 +2,7 @@ import { APIResponse } from "../utils/apiresponse.js";
 import { APIError } from "../utils/apierror.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
-import { Organization } from "../models/organization.model.js";
+import { bootstrapOrg } from "./org.controller.js";
 
 import jwt from "jsonwebtoken"
 import mongoose from "mongoose";
@@ -67,12 +67,12 @@ const registerUser = asyncHandler(async (req,res,next) =>
     })
 
     // Every user gets a personal organization — the tenant key that all their
-    // projects/keys/usage records will carry.
-    const organization = await Organization.create({
-        name: `${username}'s Organization`,
-        ownerUserId: user._id
-    })
-    user.organizationId = organization._id
+    // projects/keys/usage records will carry. Bootstrap it through the SAME helper
+    // the management API uses so the personal org is structurally identical:
+    // slug + default team + an Owner Membership (RBAC is membership-only, so
+    // without that grant the user would be 403'd on their own project routes).
+    const { org } = await bootstrapOrg({ name: `${username}'s Organization`, ownerUserId: user._id })
+    user.organizationId = org._id
     await user.save({ validateBeforeSave: false })
 
     const createdUser = await User.findById(user._id).select(

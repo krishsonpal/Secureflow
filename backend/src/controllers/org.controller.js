@@ -12,8 +12,10 @@ const slugify = (name) =>
     `${String(name || "org").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "org"}-${crypto.randomBytes(3).toString("hex")}`;
 
 // Bootstrap a new org: default team + Owner membership for the creator. Shared
-// with the backfill's shape so orgs are structurally identical however created.
-async function bootstrapOrg({ name, ownerUserId }) {
+// with the backfill's shape so orgs are structurally identical however created —
+// also used by registerUser so a personal org gets the same slug/team/owner-grant
+// (without the membership the owner would be 403'd on their own project routes).
+export async function bootstrapOrg({ name, ownerUserId }) {
     const org = await Organization.create({ name, slug: slugify(name), ownerUserId, plan: "free" });
     const team = await Team.create({ organizationId: org._id, name: "Default", isDefault: true });
     await Membership.create({ userId: ownerUserId, organizationId: org._id, scopeType: "org", role: "owner" });
