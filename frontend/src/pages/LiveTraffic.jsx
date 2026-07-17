@@ -1,45 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
-import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import LogsTable from '../components/LogsTable';
+import { useLiveTraffic } from '../hooks/useLiveTraffic';
+import { analyticsApi } from '../lib/analyticsApi';
 import { Radio } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-const API_URL = import.meta.env.VITE_API_URL || `${API_BASE_URL}/api/v1`;
 
 const LiveTraffic = () => {
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState('');
-  const [logs, setLogs] = useState([]);
-  const [connected, setConnected] = useState(false);
-  const [socket, setSocket] = useState(null);
+  const { logs, connected } = useLiveTraffic(projectId, { limit: 100 });
 
   useEffect(() => {
-    axios.get(`${API_URL}/projects/my-projects`, { withCredentials: true })
-      .then((res) => {
-        if (res.data.success) {
-          setProjects(res.data.data);
-          if (res.data.data.length) setProjectId(res.data.data[0]._id);
-        }
+    analyticsApi.listProjects()
+      .then((list) => {
+        setProjects(list || []);
+        if (list?.length) setProjectId(list[0]._id);
       })
       .catch((e) => console.error(e));
   }, []);
-
-  useEffect(() => {
-    // Authenticated handshake via the httpOnly cookie (withCredentials).
-    const s = io(API_BASE_URL, { transports: ['websocket', 'polling'], withCredentials: true });
-    setSocket(s);
-    s.on('connect', () => setConnected(true));
-    s.on('connect_error', (e) => { setConnected(false); console.error('socket', e?.message); });
-    s.on('disconnect', () => setConnected(false));
-    s.on('dashboard-update', (data) => setLogs((prev) => [data, ...prev].slice(0, 100)));
-    return () => s.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (socket && connected && projectId) socket.emit('join-project', projectId);
-  }, [socket, connected, projectId]);
 
   return (
     <div className="flex h-screen w-full bg-gray-950 text-white overflow-hidden font-sans">
@@ -59,7 +37,7 @@ const LiveTraffic = () => {
             </span>
           </div>
 
-          <select value={projectId} onChange={(e) => { setLogs([]); setProjectId(e.target.value); }} className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-gray-100 w-fit">
+          <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-gray-100 w-fit">
             {projects.length === 0 && <option value="">No projects</option>}
             {projects.map((p) => <option key={p._id} value={p._id}>{p.projectName}</option>)}
           </select>

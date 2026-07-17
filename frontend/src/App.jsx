@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import LiveTraffic from './pages/LiveTraffic';
 import ThreatAnalysis from './pages/ThreatAnalysis';
+import ThreatExplorer from './pages/ThreatExplorer';
 import Settings from './pages/Settings';
 import Organization from './pages/Organization';
 import AcceptInvite from './pages/AcceptInvite';
@@ -44,6 +45,7 @@ function AppRoutes() {
       />
       <Route path="/live-traffic" element={<ProtectedRoute><LiveTraffic /></ProtectedRoute>} />
       <Route path="/threat-analysis" element={<ProtectedRoute><ThreatAnalysis /></ProtectedRoute>} />
+      <Route path="/threat-explorer" element={<ProtectedRoute><ThreatExplorer /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/organization" element={<ProtectedRoute><Organization /></ProtectedRoute>} />
       <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
