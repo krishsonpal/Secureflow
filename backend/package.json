@@ -34,7 +34,9 @@
     "test:management": "node scripts/test-management-api.js",
     "test:alerts": "node scripts/test-alerts.js",
     "test:alert-api": "node scripts/test-alert-api.js",
-    "test:analytics": "node scripts/test-analytics.js"
+    "test:analytics": "node scripts/test-analytics.js",
+    "geo:download": "node scripts/download-geolite2.mjs",
+    "geo:verify": "node scripts/verify-geolite2.mjs"
   },
   "author": "krish sonpal",
   "license": "ISC"
