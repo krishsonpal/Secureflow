@@ -15,9 +15,11 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.13.1",
+    "react-simple-maps": "^3.0.0",
     "recharts": "^2.12.2",
     "socket.io-client": "^4.7.4",
-    "tailwind-merge": "^2.2.1"
+    "tailwind-merge": "^2.2.1",
+    "world-atlas": "^2.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.2.56",
