@@ -16,6 +16,7 @@ import {
     listEnvironments,
     deleteEnvironment
 } from "../controllers/environment.controller.js"
+import { searchEvents, geoBreakdown } from "../controllers/analytics.controller.js"
 import { verifyJWT } from "../middleware/auth.middleware.js"
 import { authorize } from "../middleware/authorize.js"
 
@@ -31,6 +32,9 @@ router.route("/delete-project").delete(authorize("project", "delete"), deletePro
 router.route("/my-projects").get(authorize("project", "read"), getMyProjects)
 router.route("/:projectId/analytics").get(authorize("analytics", "read"), getProjectAnalytics)
 router.route("/:projectId/timeseries").get(authorize("analytics", "read"), getProjectTimeseries)
+// Phase 3.10 (Dashboard V2) — Threat Explorer search + Attack Map geo breakdown.
+router.route("/:projectId/events").get(authorize("analytics", "read"), searchEvents)
+router.route("/:projectId/geo").get(authorize("analytics", "read"), geoBreakdown)
 router.route("/:projectId/security-rule")
     .get(authorize("rule", "read"), getSecurityRule)
     .put(authorize("rule", "update"), updateSecurityRule)

@@ -3,6 +3,8 @@ import { ApiKey } from "../models/apikey.model.js"
 import { APIUsage } from "../models/apiusage.model.js"
 import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js"
 import { hashToken } from "../utils/tokens.js"
+import { maskIp } from "../utils/maskIp.js"
+import { resolveGeo } from "../detection/geo.js"
 import { USAGE_STREAM, USAGE_GROUP } from "../events/usageStream.js"
 
 const THREAT_SET = new Set(THREAT_STATUSES)
@@ -50,6 +52,16 @@ const processEvent = async (fields, emit) => {
     if (obj.riskScore !== undefined && obj.riskScore !== "") usageDoc.riskScore = Number(obj.riskScore)
     if (obj.action) usageDoc.action = obj.action
     if (obj.topSignal) usageDoc.topSignal = obj.topSignal
+
+    // Phase 3.10 — enrich with geo + a de-identified IP off the hot path. Both
+    // fail open to null: geo needs GEOLITE2_CITY_DB (else null → map empty-state)
+    // and maskIp honours IP_STORE_MODE. Resolve geo on the RAW ip before masking.
+    if (obj.ip) {
+        const country = resolveGeo(obj.ip)?.country ?? null
+        if (country) usageDoc.country = country
+        const storedIp = maskIp(obj.ip)
+        if (storedIp) usageDoc.ip = storedIp
+    }
 
     const usage = await APIUsage.create(usageDoc)
 
