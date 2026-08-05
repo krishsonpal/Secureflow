@@ -35,10 +35,17 @@ export const enforceRateLimit = asyncHandler(async (req, res, next) => {
     }
 
     // 2. Active ban? A prior breach can park this identity+IP in a temporary ban.
+    const fingerprint = req.headers['x-fingerprint'] || req.body?.fingerprint;
     const banKey = `rl:ban:${identity}:${ip}`;
+    const userBanKey = fingerprint ? `rl:ban_user:${identity}:${fingerprint}` : null;
     try {
-        if (await redis.exists(banKey)) {
-            const ttl = Number(await redis.ttl(banKey));
+        const isIpBanned = await redis.exists(banKey);
+        const isUserBanned = userBanKey ? await redis.exists(userBanKey) : false;
+        
+        if (isIpBanned || isUserBanned) {
+            const ttlIp = isIpBanned ? Number(await redis.ttl(banKey)) : 0;
+            const ttlUser = isUserBanned ? Number(await redis.ttl(userBanKey)) : 0;
+            const ttl = Math.max(ttlIp, ttlUser);
             incSecurityEvent("rate_limited");
             await logUsageAsync(req.body?.apiKey, req.body?.fingerprint, "rate-limited", "Temporarily banned for exceeding rate limit.");
             return res.status(429).json(
@@ -50,16 +57,30 @@ export const enforceRateLimit = asyncHandler(async (req, res, next) => {
         console.error("[rateLimit] ban check failed:", err?.message || err);
     }
 
-    // 3. Fixed-window counter on the server-trusted identity + IP.
-    const rlKey = `rl:req:${identity}:${ip}`;
-    const { allowed, retryAfter } = await rateLimit(rlKey, rule.rateLimit, rule.rateWindow);
+    // 3. Fixed-window counter on the server-trusted identity + IP (Tenant Limiter).
+    const tenantKey = `rl:req:${identity}:${ip}`;
+    const tenantResult = await rateLimit(tenantKey, rule.rateLimit, rule.rateWindow);
 
-    if (!allowed) {
+    // 4. Fixed-window counter on the server-trusted identity + Fingerprint (End User Limiter).
+    let userResult = { allowed: true, retryAfter: 0 };
+    if (fingerprint) {
+        const userKey = `rl:user:${identity}:${fingerprint}`;
+        userResult = await rateLimit(userKey, rule.userRateLimit, rule.rateWindow);
+    }
+
+    if (!tenantResult.allowed || !userResult.allowed) {
+        const retryAfter = Math.max(tenantResult.retryAfter || 0, userResult.retryAfter || 0);
         // Optionally park the offender in a temporary ban so a sustained flood
         // doesn't keep re-hitting the window every second.
         if (rule.banDuration > 0) {
-            redis.set(banKey, "1", "EX", rule.banDuration)
-                .catch((e) => console.error("[rateLimit] set ban failed:", e?.message));
+            if (!tenantResult.allowed) {
+                redis.set(banKey, "1", "EX", rule.banDuration)
+                    .catch((e) => console.error("[rateLimit] set ban failed:", e?.message));
+            }
+            if (!userResult.allowed && userBanKey) {
+                redis.set(userBanKey, "1", "EX", rule.banDuration)
+                    .catch((e) => console.error("[rateLimit] set user ban failed:", e?.message));
+            }
         }
 
         incSecurityEvent("rate_limited");

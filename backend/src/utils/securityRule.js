@@ -7,6 +7,7 @@ const RULE_CACHE_TTL_SECONDS = 300;
 // when projectId is unknown, or when Redis/Mongo is unreachable (fail-open).
 export const DEFAULT_RULE = Object.freeze({
     rateLimit: 100,
+    userRateLimit: 60,
     rateWindow: 60,
     otpLimit: 5,
     blockBots: true,
@@ -39,6 +40,7 @@ function pickRule(doc) {
     if (!doc) return { ...DEFAULT_RULE };
     return {
         rateLimit: doc.rateLimit ?? DEFAULT_RULE.rateLimit,
+        userRateLimit: doc.userRateLimit ?? DEFAULT_RULE.userRateLimit,
         rateWindow: doc.rateWindow ?? DEFAULT_RULE.rateWindow,
         otpLimit: doc.otpLimit ?? DEFAULT_RULE.otpLimit,
         blockBots: doc.blockBots ?? DEFAULT_RULE.blockBots,

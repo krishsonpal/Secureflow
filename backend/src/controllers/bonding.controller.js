@@ -9,6 +9,7 @@ import { APIUsage } from "../models/apiusage.model.js";
 import {sendEmail} from "../utils/sendEmail.js"
 import { hashToken } from "../utils/tokens.js"
 import { loadSecurityRule } from "../utils/securityRule.js"
+import crypto from "crypto";
 
 
 const processPostLoginTasks = async (data) => {
@@ -98,42 +99,45 @@ const logout = asyncHandler(async (req, res) => {
 });
 
 const handleLoginFailure = asyncHandler(async (req, res) => {
-    const { fingerprint, apiKey } = req.body;
+    const { fingerprint, accountIdentifier, apiKey } = req.body;
 
-    if (!fingerprint) {
-        throw new APIError(400, "Fingerprint is required");
+    if (!accountIdentifier && !fingerprint) {
+        throw new APIError(400, "At least accountIdentifier or fingerprint is required");
     }
 
-    // Scope the lockout to SERVER-TRUSTED dimensions. The old `fail:fp:<fingerprint>`
-    // key was entirely client-supplied: an attacker rotated the fingerprint to dodge
-    // the lock, or forged someone else's to lock them out. We now bucket by the
-    // resolved apiKey hash + observed IP, and additionally cap per-IP so
-    // fingerprint-rotation from one origin still trips a lock.
     const scope = req.apiKeyHash || "anon";
-    const ip = req.ip || "unknown";
     const rule = await loadSecurityRule(req.projectId);
-    const fpLimit = rule.otpLimit;            // per device fingerprint
-    const ipLimit = rule.otpLimit * 5;        // coarser per-IP ceiling
+    const otpLimit = rule.otpLimit;
 
-    const fpKey = `fail:fp:${scope}:${fingerprint}`;
-    const ipKey = `fail:ip:${scope}:${ip}`;
+    // 1. Account Counter (HMAC normalized identity)
+    let accAttempts = 0;
+    if (accountIdentifier) {
+        const normalized = accountIdentifier.toString().trim().toLowerCase();
+        const secret = process.env.HMAC_SECRET || "secureflow-fallback-secret";
+        const stableAccountId = crypto.createHmac("sha256", secret).update(normalized).digest("hex");
+        
+        const accKey = `fail:acc:${scope}:${stableAccountId}`;
+        accAttempts = await redis.incr(accKey);
+        if (accAttempts === 1) await redis.expire(accKey, 86400);
+    }
 
-    const [fpAttempts, ipAttempts] = await Promise.all([
-        redis.incr(fpKey),
-        redis.incr(ipKey),
-    ]);
-    if (fpAttempts === 1) await redis.expire(fpKey, 86400);
-    if (ipAttempts === 1) await redis.expire(ipKey, 86400);
+    // 2. Device Counter (Graceful fallback if fingerprint is missing)
+    let fpAttempts = 0;
+    if (fingerprint) {
+        const fpKey = `fail:fp:${scope}:${fingerprint}`;
+        fpAttempts = await redis.incr(fpKey);
+        if (fpAttempts === 1) await redis.expire(fpKey, 86400);
+    }
 
-    const locked = fpAttempts > fpLimit || ipAttempts > ipLimit;
+    const locked = (accAttempts > otpLimit) || (fpAttempts > otpLimit);
 
     if (locked) {
         await logUsageAsync(apiKey, fingerprint, "failed");
         return res.status(423).json(
             new APIResponse(
                 423,
-                { isLocked: true, attempts: fpAttempts, reason: "Too many failed attempts" },
-                "Security Alert: This device is currently locked."
+                { isLocked: true, accAttempts, fpAttempts, reason: "Too many failed attempts" },
+                "Security Alert: This account or device is currently locked."
             )
         );
     }
@@ -143,7 +147,7 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
     return res.status(401).json(
         new APIResponse(
             401,
-            { isLocked: false, attemptsLeft: Math.max(0, fpLimit - fpAttempts) },
+            { isLocked: false, attemptsLeft: Math.max(0, otpLimit - Math.max(accAttempts, fpAttempts)) },
             "Invalid login attempt."
         )
     );

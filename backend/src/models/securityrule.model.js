@@ -28,6 +28,10 @@ const securityRuleSchema = new Schema(
             type : Number,
             default : 100
         },
+        userRateLimit : {
+            type : Number,
+            default : 60
+        },
         // Window (seconds) the rateLimit applies over. Together they express
         // "rateLimit requests per rateWindow seconds".
         rateWindow : {
