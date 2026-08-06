@@ -4,9 +4,14 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-# API base URL is baked at build time; override with --build-arg VITE_API_BASE_URL=...
+# Both API URL vars are baked at build time (Vite replaces import.meta.env.* at build).
+# VITE_API_BASE_URL  — used by Dashboard, Settings, ThreatAnalysis, useLiveTraffic, orgApi, analyticsApi
+# VITE_API_URL       — used by AuthContext (includes /api/v1 suffix)
+# Set both to your deployed backend URL when building for production.
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 FROM nginx:alpine
