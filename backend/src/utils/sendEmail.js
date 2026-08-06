@@ -1,26 +1,24 @@
 import nodemailer from "nodemailer"
 import { APIError } from "./apierror.js"
 
-const sendEmail = async (email, message) => {
+const sendEmail = async (email, message, subject = "Important") => {
     try {
 
         const transporter = nodemailer.createTransport({
             host: process.env.SMTP_HOST,
-            port: process.env.SMTP_PORT,
-            secure: false,
+            port: Number(process.env.SMTP_PORT) || 587,
+            // secure:true only for 465; 587 uses STARTTLS (secure:false + upgrade)
+            secure: Number(process.env.SMTP_PORT) === 465,
             auth: {
                 user: process.env.SMTP_USER,
                 pass: process.env.SMTP_PASS
-            },
-            tls: {
-                rejectUnauthorized: false
             }
         })
 
         await transporter.sendMail({
             from: process.env.SMTP_FROM,
             to: email,
-            subject: "Important",
+            subject,
             text: message
         })
 

@@ -7,37 +7,43 @@ import { logUsageAsync } from "../utils/logusage.js";
 import { ClientUserSchema } from "../models/clientuser.model.js";
 import { APIUsage } from "../models/apiusage.model.js";
 import {sendEmail} from "../utils/sendEmail.js"
+import { hashToken } from "../utils/tokens.js"
+import { loadSecurityRule } from "../utils/securityRule.js"
+import crypto from "crypto";
 
 
 const processPostLoginTasks = async (data) => {
     try {
         const { email, fingerprint, apiKeyId } = data;
-        
-        const keyDoc = await ApiKey.findOne({ key: apiKeyId }).populate("projectId");
-        
+
+        const keyDoc = await ApiKey.findOne({ key: hashToken(apiKeyId) }).populate("projectId");
+
         if (!keyDoc) return;
 
         const projectId = keyDoc.projectId;
+        const organizationId = keyDoc.organizationId;
 
         const existingUser = await ClientUserSchema.findOne({
             fingerPrint: fingerprint,
             projectId: projectId
         });
-        
-        
+
+
         if (!existingUser) {
             await ClientUserSchema.create({
                 fingerPrint: fingerprint,
-                projectId: projectId
+                projectId: projectId,
+                organizationId: organizationId
             });
             sendEmail(email,"New device register")
 
-            
+
         }
-        
+
         const usage = await APIUsage.create({
             apiKey: keyDoc._id,
             projectId: projectId,
+            organizationId: organizationId,
             fingerprint: fingerprint,
             status: "success"
         });
@@ -93,28 +99,45 @@ const logout = asyncHandler(async (req, res) => {
 });
 
 const handleLoginFailure = asyncHandler(async (req, res) => {
-    const { fingerprint, apiKey } = req.body;
+    const { fingerprint, accountIdentifier, apiKey } = req.body;
 
-    if (!fingerprint) {
-        throw new APIError(400, "Fingerprint is required");
+    if (!accountIdentifier && !fingerprint) {
+        throw new APIError(400, "At least accountIdentifier or fingerprint is required");
     }
 
-    const failKey = `fail:fp:${fingerprint}`;
-    const attempts = await redis.incr(failKey);
+    const scope = req.apiKeyHash || "anon";
+    const rule = await loadSecurityRule(req.projectId);
+    const otpLimit = rule.otpLimit;
 
-    if (attempts === 1) {
-        await redis.expire(failKey, 86400); 
+    // 1. Account Counter (HMAC normalized identity)
+    let accAttempts = 0;
+    if (accountIdentifier) {
+        const normalized = accountIdentifier.toString().trim().toLowerCase();
+        const secret = process.env.HMAC_SECRET || "secureflow-fallback-secret";
+        const stableAccountId = crypto.createHmac("sha256", secret).update(normalized).digest("hex");
+        
+        const accKey = `fail:acc:${scope}:${stableAccountId}`;
+        accAttempts = await redis.incr(accKey);
+        if (accAttempts === 1) await redis.expire(accKey, 86400);
     }
 
-    if (attempts > 5) {
+    // 2. Device Counter (Graceful fallback if fingerprint is missing)
+    let fpAttempts = 0;
+    if (fingerprint) {
+        const fpKey = `fail:fp:${scope}:${fingerprint}`;
+        fpAttempts = await redis.incr(fpKey);
+        if (fpAttempts === 1) await redis.expire(fpKey, 86400);
+    }
 
+    const locked = (accAttempts > otpLimit) || (fpAttempts > otpLimit);
 
+    if (locked) {
         await logUsageAsync(apiKey, fingerprint, "failed");
         return res.status(423).json(
             new APIResponse(
-                423, 
-                { isLocked: true, attempts, reason: "Rate limit exceeded" }, 
-                "Security Alert: This device fingerprint is currently locked."
+                423,
+                { isLocked: true, accAttempts, fpAttempts, reason: "Too many failed attempts" },
+                "Security Alert: This account or device is currently locked."
             )
         );
     }
@@ -123,8 +146,8 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
 
     return res.status(401).json(
         new APIResponse(
-            401, 
-            { isLocked: false, attemptsLeft: 5 - attempts }, 
+            401,
+            { isLocked: false, attemptsLeft: Math.max(0, otpLimit - Math.max(accAttempts, fpAttempts)) },
             "Invalid login attempt."
         )
     );
@@ -133,51 +156,42 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
 
 
 const validateAndProcessRequest = asyncHandler(async (req, res) => {
-    const { sessionId, fingerprint, apiKey } = req.body;
+    const { sessionId, fingerprint } = req.body;
 
-    if (!sessionId || !fingerprint) {
+    // apiKeyId is the server-trusted MongoDB ObjectId resolved by checkuserlimit
+    // from the x-api-key header. Use it for all usage logging so events are
+    // always recorded even when sessionId/fingerprint are absent (e.g. Postman,
+    // direct API integrations that haven't registered a session yet).
+    const apiKeyMeta = { apiKeyId: req.apiKeyId || null, ip: req.ip };
 
-        await logUsageAsync(apiKey, fingerprint, "failed", "Session credentials or fingerprint missing from request.");
-        return res.status(401).json(
-            new APIResponse(401, null, "Session credentials missing")
-        );
+    // Session validation is optional for direct API calls. If sessionId is
+    // present, enforce fingerprint binding; if absent, skip session check and
+    // allow the request (the decision middleware has already scored it).
+    if (sessionId) {
+        if (!fingerprint) {
+            await logUsageAsync(null, null, "failed",
+                "sessionId supplied but fingerprint missing.", apiKeyMeta);
+            return res.status(401).json(
+                new APIResponse(401, null, "Fingerprint required when sessionId is provided")
+            );
+        }
+
+        const storedFingerprint = await redis.get(`session:${sessionId}`);
+
+        if (!storedFingerprint) {
+            await logUsageAsync(null, fingerprint, "failed", "Session expired.", apiKeyMeta);
+            return res.status(401).json(new APIResponse(401, null, "Session expired"));
+        }
+
+        if (storedFingerprint !== fingerprint) {
+            await logUsageAsync(null, fingerprint, "session-theft",
+                "Device fingerprint does not match the stored session fingerprint.", apiKeyMeta);
+            return res.status(403).json(new APIResponse(403, null, "Fingerprint mismatch"));
+        }
     }
 
-    const storedFingerprint = await redis.get(`session:${sessionId}`);
-
-    if (!storedFingerprint) {
-        await logUsageAsync(apiKey, fingerprint, "failed");
-        return res.status(401).json(new APIResponse(401, null, "Session expired"));
-    }
-
-    if (storedFingerprint !== fingerprint) {
-        await logUsageAsync(apiKey, fingerprint, "session-theft", "Device fingerprint does not match the stored session fingerprint.");
-        return res.status(403).json(new APIResponse(403, null, "Fingerprint mismatch"));
-    }
-
-    // Atomic Rate Limiting (10 req / 60 sec)
-    const rateLimitKey = `rate:session:${sessionId}`;
-    const luaScript = `
-        local current = redis.call("INCR", KEYS[1])
-        if current == 1 then
-            redis.call("EXPIRE", KEYS[1], 60)
-        end
-        return current
-    `;
-
-    const requestCount = await redis.eval(luaScript, 1, rateLimitKey);
-
-    if (requestCount > 10) {
-        // Log the rate limit hit asynchronously for the dashboard
-        await logUsageAsync(apiKey, fingerprint, "rate-limited");
-
-        return res.status(429).json(
-            new APIResponse(429, { retryAfter: "60s" }, "Rate limit exceeded")
-        );
-    }
-
-    // Success - Log usage and return data
-    await logUsageAsync(apiKey, fingerprint, "success");
+    // Rate limiting is handled upstream by `enforceRateLimit` middleware.
+    await logUsageAsync(null, fingerprint || null, "success", "", apiKeyMeta);
 
     return res.status(200).json(
         new APIResponse(200, { access: "granted" }, "Request processed")

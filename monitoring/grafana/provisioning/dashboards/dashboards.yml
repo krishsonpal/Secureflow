@@ -1,0 +1,13 @@
+# Tells Grafana to load dashboard JSON files from the mounted folder on startup.
+apiVersion: 1
+
+providers:
+  - name: SecureFlow
+    orgId: 1
+    folder: SecureFlow
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

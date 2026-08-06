@@ -29,15 +29,21 @@ const userSchema = new Schema(
         balance : {
             type : Number,
             default : 10
+        },
+        role : {
+            type : String,
+            enum : ["admin", "developer", "viewer"],
+            default : "admin"
+        },
+        // Tenant key — the user's home organization (Phase 1 groundwork).
+        organizationId : {
+            type : Schema.Types.ObjectId,
+            ref : "Organization",
+            index : true
         }
-        // role : {
-        //     type : String,
-        //     enum : ["DEVELOPER","ADMIN"],
-        //     default : "ADMIN"
-        // },
         // isVerified :{
         //     type : Boolean,
-        //     default 
+        //     default
         // }
     },{
         timestamps : true

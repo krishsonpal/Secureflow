@@ -20,12 +20,14 @@ const MetricCard = ({ title, value, icon, trend, trendUp }) => {
             {icon}
           </div>
         </div>
-        <div className="mt-4 flex items-center text-xs">
-          <span className={`font-semibold overflow-hidden flex items-center ${trendUp ? 'text-green-500' : 'text-red-500'}`}>
-            {trendUp ? '↑' : '↓'} {trend}
-          </span>
-          <span className="ml-2 text-gray-500">vs last hour</span>
-        </div>
+        {trend != null && (
+          <div className="mt-4 flex items-center text-xs">
+            <span className={`font-semibold overflow-hidden flex items-center ${trendUp ? 'text-green-500' : 'text-red-500'}`}>
+              {trendUp ? '↑' : '↓'} {trend}
+            </span>
+            <span className="ml-2 text-gray-500">vs prior period</span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

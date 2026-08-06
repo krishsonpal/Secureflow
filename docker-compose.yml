@@ -1,0 +1,137 @@
+# SecureFlow — full local stack (Part 1.13).
+#
+# Brings up MongoDB, Redis, the XSS ML service, the backend API, a standalone
+# usage worker, the dashboard, and the Prometheus + Grafana monitoring pair.
+# The ML build context points at the sibling microservice repo (../microservice/
+# secureflow-xss) — keep the workspace layout, or swap `build` for a published
+# `image:`.
+#
+# Secrets below are DEV DEFAULTS. Override via a .env file next to this compose
+# file (compose substitutes ${VARS}) before using anywhere real.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ml:
+    build:
+      context: ../microservice/secureflow-xss
+    restart: unless-stopped
+    environment:
+      ML_API_KEY: ${ML_API_KEY:-}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+    ports:
+      - "7860:7860"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7860/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/}
+      DB_NAME: ${DB_NAME:-SECUREFLOW}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      MICROSERVICE_URI: ${MICROSERVICE_URI:-http://ml:7860/predict}
+      MICROSERVICE_API_KEY: ${ML_API_KEY:-}
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:-dev-access-secret-change-me}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-dev-refresh-secret-change-me}
+      # Required: jsonwebtoken throws if expiresIn is undefined at sign time.
+      ACCESS_TOKEN_EXPIRY: ${ACCESS_TOKEN_EXPIRY:-1d}
+      REFRESH_TOKEN_EXPIRY: ${REFRESH_TOKEN_EXPIRY:-10d}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3000:3000"
+
+  # Standalone scale-out worker (same image, worker entrypoint). Emits dashboard
+  # updates cross-process via the Socket.io Redis adapter (Part 1.7).
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/}
+      DB_NAME: ${DB_NAME:-SECUREFLOW}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    command: ["node", "src/workers/index.js"]
+    # The worker reuses the backend image but serves no HTTP, so the image's
+    # /healthz HEALTHCHECK doesn't apply — disable it to avoid a false "unhealthy".
+    healthcheck:
+      disable: true
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  mongo-data:
+  grafana-data:

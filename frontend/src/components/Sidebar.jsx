@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Shield, Activity, Settings, LogOut, Book } from 'lucide-react';
+import { LayoutDashboard, Shield, Activity, Settings, LogOut, Book, Building2, Bell, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -19,9 +19,12 @@ const Sidebar = () => {
       <nav className="flex-1 space-y-2 px-4 py-6">
         <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={location.pathname === '/'} onClick={() => navigate('/')} />
         <NavItem icon={<Book size={20} />} label="Documentation" active={location.pathname === '/docs'} onClick={() => navigate('/docs')} />
-        <NavItem icon={<Activity size={20} />} label="Live Traffic" onClick={() => {}} />
-        <NavItem icon={<Shield size={20} />} label="Threat Analysis" onClick={() => {}} />
-        <NavItem icon={<Settings size={20} />} label="Settings" onClick={() => {}} />
+        <NavItem icon={<Activity size={20} />} label="Live Traffic" active={location.pathname === '/live-traffic'} onClick={() => navigate('/live-traffic')} />
+        <NavItem icon={<Shield size={20} />} label="Threat Analysis" active={location.pathname === '/threat-analysis'} onClick={() => navigate('/threat-analysis')} />
+        <NavItem icon={<Search size={20} />} label="Threat Explorer" active={location.pathname === '/threat-explorer'} onClick={() => navigate('/threat-explorer')} />
+        <NavItem icon={<Bell size={20} />} label="Alerts" active={location.pathname === '/alerts'} onClick={() => navigate('/alerts')} />
+        <NavItem icon={<Building2 size={20} />} label="Organization" active={location.pathname === '/organization'} onClick={() => navigate('/organization')} />
+        <NavItem icon={<Settings size={20} />} label="Settings" active={location.pathname === '/settings'} onClick={() => navigate('/settings')} />
       </nav>
       <div className="p-4 border-t border-gray-800">
         <div onClick={logout}>

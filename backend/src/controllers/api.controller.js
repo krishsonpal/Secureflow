@@ -1,77 +1,55 @@
 import { APIResponse } from "../utils/apiresponse.js";
 import { APIError } from "../utils/apierror.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { User } from "../models/user.model.js";
-import crypto from 'crypto';
-import jwt from "jsonwebtoken"
-import { Project } from "../models/project.model.js";
 import { ApiKey } from "../models/apikey.model.js";
+import { Environment } from "../models/environment.model.js";
+import { generateApiKey } from "../utils/tokens.js";
+import { tenantOrgId } from "../utils/tenantScope.js";
 
+// Auth handled by verifyJWT + authorize("apikey","create"), which resolves the
+// project's tenant scope and verifies the caller may create keys there
+// (req.tenant.project). The stored `key` is a sha256 HASH; the plaintext
+// `sk_live_…` key is returned exactly once and never persisted or shown again.
+const creatNewAPIKey = asyncHandler(async (req, res) => {
+    const project = req.tenant.project
+    const organizationId = tenantOrgId(req)
 
-const createApiKey = (req,res,next)=>{
-    return crypto.randomBytes(32).toString('hex');
-}
+    // Keys are scoped to an environment (Phase 3.1). Use an explicit one (must
+    // belong to this project) or fall back to the project's default env.
+    let env
+    if (req.body.environmentId) {
+        env = await Environment.findOne({ _id: req.body.environmentId, projectId: project._id, organizationId })
+        if (!env) throw new APIError(400, "environmentId does not belong to this project")
+    } else {
+        env = await Environment.findOne({ projectId: project._id, isDefault: true })
+            || await Environment.create({ projectId: project._id, organizationId, name: "production", isDefault: true })
+    }
 
+    const { full, hash, prefix } = generateApiKey()
 
-const creatNewAPIKey = asyncHandler( async(req,res,next) =>{
-    const accessToken = req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
-    const {projectId} = req.body
+    const apiKey = await ApiKey.create({
+        key: hash,
+        keyPrefix: prefix,
+        userId: req.user._id,
+        organizationId,
+        projectId: project._id,
+        environmentId: env._id,
+        lastUsedAt: new Date()
+    })
 
-        if(!accessToken){
-                throw new APIError(400,"AccessToken is missing")
-            }
-        
-            try{
-                const decodedToken = jwt.verify(
-                    accessToken,
-                    process.env.ACCESS_TOKEN_SECRET
-                )
-                const foundproject = await Project.findById(projectId)
-
-                if(!foundproject)
-                {
-                    throw new APIError(401,"Project doesnot exists")
-                }
-
-                if(foundproject.userId.toString() !== decodedToken?._id)
-                {
-                    throw new APIError(401,"Project userid doesnot match with the token userid")
-                }
-                
-                const hashCode=  createApiKey()
-
-                if(!hashCode)
-                {
-                    throw new APIError(501,"An error occured while createing api key")
-                }
-
-                const apiKey= await ApiKey.create({
-                    key : hashCode,
-                    userId : foundproject.userId,
-                    projectId : foundproject._id,
-                    lastUsedAt : new Date()
-                })    
-    
-                const createdAPI = await ApiKey.findById(apiKey._id).select(
-                        "-userId"
-                    )
-                if(!createdAPI){
-                        throw new APIError(500, "Something went wrong will creating APIKey")
-                }
-                return res
-                .status(201)
-                .json(
-                    new APIResponse(201,createdAPI,"New APIKey Created Successfully")
-                )
-    
-            }
-            catch(error){
-            throw new APIError(401,error?.message || "Something went wrong")
-            }
+    return res
+        .status(201)
+        .json(new APIResponse(201, {
+            id: apiKey._id,
+            key: full,            // shown ONCE — store it now
+            keyPrefix: prefix,
+            projectId: apiKey.projectId,
+            environmentId: apiKey.environmentId,
+            credits: apiKey.credits,
+            createdAt: apiKey.createdAt
+        }, "New APIKey created. Copy it now — it will not be shown again."))
 })
 
 export {
     creatNewAPIKey
 }
-
-

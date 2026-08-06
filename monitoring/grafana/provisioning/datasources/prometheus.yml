@@ -1,0 +1,12 @@
+# Grafana datasource provisioning — auto-registers Prometheus on startup so no
+# manual UI setup is needed. Consumed by the grafana service in Part 1.13.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # "prometheus" is the compose service name.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true

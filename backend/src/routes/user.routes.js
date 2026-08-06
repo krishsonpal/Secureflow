@@ -10,6 +10,7 @@ import {
     setNewPassword,
     getCurrentUser
 } from "../controllers/user.controller.js"
+import { verifyJWT } from "../middleware/auth.middleware.js"
 
 
 
@@ -23,7 +24,7 @@ router.route("/logout").post(logoutUser)
 
 router.route("/refresh-token").post(refreshToken)
 
-// router.route("/get-current-user").get(getCurrentUser)
+router.route("/current-user").get(verifyJWT, getCurrentUser)
 
 
 

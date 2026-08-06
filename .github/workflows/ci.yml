@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "phase0-1-hardening"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  backend:
+    name: Backend (install + syntax + audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # No test framework yet — syntax-check every source file so a broken import
+      # or parse error fails the build. (Replace with `npm test` once tests land.)
+      - name: Syntax check
+        run: find src -name "*.js" -print0 | xargs -0 -n1 node --check
+      - name: Audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Audit (high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  security-scan:
+    name: Security scan (Trivy fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0" # report only; flip to "1" to fail the build on findings

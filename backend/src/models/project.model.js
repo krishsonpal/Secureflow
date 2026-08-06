@@ -5,6 +5,20 @@ const projectSchema = new Schema({
         type : Schema.Types.ObjectId,
         ref : "User"
     },
+    organizationId : {
+        type : Schema.Types.ObjectId,
+        ref : "Organization",
+        index : true
+    },
+    // Owning team (Phase 3.1). A project belongs to exactly one team; nullable
+    // pre-backfill, then always set (the backfill assigns the org's default
+    // team, and project-create sets it going forward). Strict tree — no
+    // multi-team sharing in this slice.
+    teamId : {
+        type : Schema.Types.ObjectId,
+        ref : "Team",
+        index : true
+    },
     projectName : {
         type : String,
         required : [true , "Project name is required"],
