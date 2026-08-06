@@ -19,10 +19,9 @@ import { logger } from "./utils/logger.js"
 
 const app = express()
 
-// Trust the first proxy hop so req.ip reflects the real client (X-Forwarded-For)
-// rather than the load balancer. The per-IP rate limiters key off req.ip, so an
-// untrusted proxy setup would otherwise bucket every client under one IP.
-app.set("trust proxy", 1)
+// Trust proxy hops so req.ip reflects the real client public IP (X-Forwarded-For)
+// rather than internal load balancer / container proxy IPs (e.g. Render's 10.x.x.x).
+app.set("trust proxy", true)
 
 // Observability first: every request gets a correlation id (req.id + X-Request-Id)
 // and a structured access log + Prometheus metrics on completion.
