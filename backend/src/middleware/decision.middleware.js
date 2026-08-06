@@ -157,11 +157,12 @@ export const decisionMiddleware = asyncHandler(async (req, res, next) => {
 
     const reasonList = topReasons.map((r) => r.name).join(", ");
     await logUsageAsync(
-        req.body?.apiKey,
+        null,                  // raw key not available on this path — apiKeyId used instead
         req.body?.fingerprint,
         status,
         `Blocked (risk ${decision.riskScore}${forcedByRule ? ", rule" : ""}): ${reasonList}`,
         {
+            apiKeyId: req.apiKeyId || null,    // MongoDB ObjectId string from checkuserlimit
             riskScore: decision.riskScore,
             action: "block",
             topSignal: topSignal || (forcedByRule ? `rule:${ruleResult.matched[0]?.name}` : "unknown"),

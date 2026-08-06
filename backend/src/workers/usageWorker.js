@@ -1,4 +1,5 @@
 import Redis from "ioredis"
+import mongoose from "mongoose"
 import { ApiKey } from "../models/apikey.model.js"
 import { APIUsage } from "../models/apiusage.model.js"
 import { UsageRollup, THREAT_STATUSES } from "../models/usagerollup.model.js"
@@ -34,9 +35,16 @@ const fieldsToObject = (fields) => {
 // until the Socket.io Redis adapter lands (Part 1.7); we swallow that.
 const processEvent = async (fields, emit) => {
     const obj = fieldsToObject(fields)
-    if (!obj.apiKey) return
 
-    const keyDoc = await ApiKey.findOne({ key: hashToken(obj.apiKey) }).select("projectId organizationId")
+    // Resolve the ApiKey document. Prefer the already-resolved MongoDB ObjectId
+    // string (`apiKeyId`, set by checkuserlimit and passed through the stream) to
+    // skip an extra DB round-trip. Fall back to hash lookup for legacy events.
+    let keyDoc = null
+    if (obj.apiKeyId && mongoose.isValidObjectId(obj.apiKeyId)) {
+        keyDoc = await ApiKey.findById(obj.apiKeyId).select("projectId organizationId")
+    } else if (obj.apiKey) {
+        keyDoc = await ApiKey.findOne({ key: hashToken(obj.apiKey) }).select("projectId organizationId")
+    }
     if (!keyDoc) return
 
     // Phase 2.1 decision metadata — only present on scored events (empty string

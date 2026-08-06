@@ -156,35 +156,42 @@ const handleLoginFailure = asyncHandler(async (req, res) => {
 
 
 const validateAndProcessRequest = asyncHandler(async (req, res) => {
-    const { sessionId, fingerprint, apiKey } = req.body;
+    const { sessionId, fingerprint } = req.body;
 
-    if (!sessionId || !fingerprint) {
+    // apiKeyId is the server-trusted MongoDB ObjectId resolved by checkuserlimit
+    // from the x-api-key header. Use it for all usage logging so events are
+    // always recorded even when sessionId/fingerprint are absent (e.g. Postman,
+    // direct API integrations that haven't registered a session yet).
+    const apiKeyMeta = { apiKeyId: req.apiKeyId || null, ip: req.ip };
 
-        await logUsageAsync(apiKey, fingerprint, "failed", "Session credentials or fingerprint missing from request.");
-        return res.status(401).json(
-            new APIResponse(401, null, "Session credentials missing")
-        );
+    // Session validation is optional for direct API calls. If sessionId is
+    // present, enforce fingerprint binding; if absent, skip session check and
+    // allow the request (the decision middleware has already scored it).
+    if (sessionId) {
+        if (!fingerprint) {
+            await logUsageAsync(null, null, "failed",
+                "sessionId supplied but fingerprint missing.", apiKeyMeta);
+            return res.status(401).json(
+                new APIResponse(401, null, "Fingerprint required when sessionId is provided")
+            );
+        }
+
+        const storedFingerprint = await redis.get(`session:${sessionId}`);
+
+        if (!storedFingerprint) {
+            await logUsageAsync(null, fingerprint, "failed", "Session expired.", apiKeyMeta);
+            return res.status(401).json(new APIResponse(401, null, "Session expired"));
+        }
+
+        if (storedFingerprint !== fingerprint) {
+            await logUsageAsync(null, fingerprint, "session-theft",
+                "Device fingerprint does not match the stored session fingerprint.", apiKeyMeta);
+            return res.status(403).json(new APIResponse(403, null, "Fingerprint mismatch"));
+        }
     }
 
-    const storedFingerprint = await redis.get(`session:${sessionId}`);
-
-    if (!storedFingerprint) {
-        await logUsageAsync(apiKey, fingerprint, "failed");
-        return res.status(401).json(new APIResponse(401, null, "Session expired"));
-    }
-
-    if (storedFingerprint !== fingerprint) {
-        await logUsageAsync(apiKey, fingerprint, "session-theft", "Device fingerprint does not match the stored session fingerprint.");
-        return res.status(403).json(new APIResponse(403, null, "Fingerprint mismatch"));
-    }
-
-    // Rate limiting moved to `enforceRateLimit` middleware (Part 1.6): it keys on
-    // the server-trusted apiKey hash + client IP (not the client-supplied
-    // sessionId, which the old inline limiter used and which rotating sessionIds
-    // trivially bypassed) and pulls the limit from the project's SecurityRule.
-
-    // Success - Log usage and return data
-    await logUsageAsync(apiKey, fingerprint, "success");
+    // Rate limiting is handled upstream by `enforceRateLimit` middleware.
+    await logUsageAsync(null, fingerprint || null, "success", "", apiKeyMeta);
 
     return res.status(200).json(
         new APIResponse(200, { access: "granted" }, "Request processed")

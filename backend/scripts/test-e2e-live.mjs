@@ -13,8 +13,8 @@ async function runTest() {
     const timestamp = Date.now()
     const testUser = {
         name: "Test Developer",
-        username: `testuser_${timestamp}`,
-        email: `testdev_${timestamp}@example.com`,
+        username: `testuser_1`,
+        email: `testdev_21@example.com`,
         password: "Password123!"
     }
 

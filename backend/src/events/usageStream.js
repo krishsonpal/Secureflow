@@ -17,6 +17,10 @@ export const publishUsageEvent = async (event = {}) => {
             "MAXLEN", "~", STREAM_MAXLEN,
             "*",
             "apiKey", event.apiKey ?? "",
+            // `apiKeyId` is the resolved MongoDB ObjectId string from req.apiKeyId
+            // (set by checkuserlimit). When present the worker skips the re-hash
+            // DB lookup and uses it directly.
+            "apiKeyId", event.apiKeyId ?? "",
             "fingerprint", event.fingerprint ?? "",
             "status", event.status ?? "",
             "message", event.message ?? "",
