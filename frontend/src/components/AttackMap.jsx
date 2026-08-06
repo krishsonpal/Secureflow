@@ -86,8 +86,18 @@ const AttackMap = ({ projectId, hours = 24 }) => {
                           hover: { outline: 'none', fill: count ? '#f59e0b' : '#374151' },
                           pressed: { outline: 'none' },
                         }}
-                        onMouseEnter={(e) => setHover({ name: geo.properties.name, count, x: e.clientX, y: e.clientY })}
-                        onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))}
+                        onMouseEnter={(e) => {
+                          const rect = e.currentTarget.ownerSVGElement?.getBoundingClientRect();
+                          const x = rect ? e.clientX - rect.left : e.clientX;
+                          const y = rect ? e.clientY - rect.top : e.clientY;
+                          setHover({ name: geo.properties.name, count, x, y });
+                        }}
+                        onMouseMove={(e) => {
+                          const rect = e.currentTarget.ownerSVGElement?.getBoundingClientRect();
+                          const x = rect ? e.clientX - rect.left : e.clientX;
+                          const y = rect ? e.clientY - rect.top : e.clientY;
+                          setHover((h) => (h ? { ...h, x, y } : h));
+                        }}
                         onMouseLeave={() => setHover(null)}
                       />
                     );
@@ -97,10 +107,16 @@ const AttackMap = ({ projectId, hours = 24 }) => {
             </ComposableMap>
 
             {hover && (
-              <div className="fixed z-50 pointer-events-none bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-100 shadow-lg"
-                style={{ left: hover.x + 12, top: hover.y + 12 }}>
-                <span className="font-medium">{hover.name}</span>
-                <span className="text-gray-400 ml-2">{hover.count} threat{hover.count === 1 ? '' : 's'}</span>
+              <div
+                className="absolute z-50 pointer-events-none bg-gray-900/95 border border-gray-700 rounded-md px-2.5 py-1.5 text-xs text-gray-100 shadow-xl backdrop-blur-sm"
+                style={{
+                  left: hover.x,
+                  top: Math.max(0, hover.y - 40),
+                  transform: 'translateX(-50%)',
+                }}
+              >
+                <div className="font-semibold text-white">{hover.name}</div>
+                <div className="text-gray-400 text-[11px]">{hover.count} threat{hover.count === 1 ? '' : 's'}</div>
               </div>
             )}
 
