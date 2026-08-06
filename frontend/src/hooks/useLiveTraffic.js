@@ -22,11 +22,13 @@ export function useLiveTraffic(projectId, { limit = 100, onEvent } = {}) {
   onEventRef.current = onEvent;
 
   useEffect(() => {
+    const token = localStorage.getItem('accessToken');
     const s = io(API_BASE_URL, {
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       transports: ['websocket', 'polling'],
       withCredentials: true,
+      auth: { token: token ? `Bearer ${token}` : undefined },
     });
     socketRef.current = s;
 

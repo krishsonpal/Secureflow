@@ -19,6 +19,14 @@ export const AuthProvider = ({ children }) => {
   // can't read the httpOnly refresh cookie from JS, so we always try once and
   // let the server decide; on failure we clear the session and go to login.
   useEffect(() => {
+    const requestInterceptor = axios.interceptors.request.use((config) => {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    });
+
     const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -34,11 +42,14 @@ export const AuthProvider = ({ children }) => {
           try {
             const res = await axios.post(`${API_URL}/users/refresh-token`, {}, { withCredentials: true });
             if (res.data?.success || res.status === 200 || res.status === 201) {
-              // New access token is set as an httpOnly cookie by the server; just retry.
+              if (res.data?.data?.accessToken) {
+                localStorage.setItem('accessToken', res.data.data.accessToken);
+              }
               return axios(originalRequest);
             }
           } catch (err) {
             localStorage.removeItem('user');
+            localStorage.removeItem('accessToken');
             setUser(null);
             window.location.href = '/login';
           }
@@ -48,6 +59,7 @@ export const AuthProvider = ({ children }) => {
     );
 
     return () => {
+      axios.interceptors.request.eject(requestInterceptor);
       axios.interceptors.response.eject(responseInterceptor);
     };
   }, [API_URL]);
@@ -65,10 +77,12 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await axios.post(`${API_URL}/users/login`, { username, email, password }, { withCredentials: true });
       if (response.data.success) {
-        // Tokens are delivered as httpOnly cookies by the server; we only cache
-        // the non-sensitive user profile for UX. No tokens in localStorage.
-        setUser(response.data.data.user);
-        localStorage.setItem('user', JSON.stringify(response.data.data.user));
+        const { user: userData, accessToken } = response.data.data;
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+        if (accessToken) {
+          localStorage.setItem('accessToken', accessToken);
+        }
         return { success: true };
       }
     } catch (error) {
@@ -93,9 +107,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Logout failed', error);
     } finally {
-      // Server clears the httpOnly cookies; we just drop the cached profile.
       setUser(null);
       localStorage.removeItem('user');
+      localStorage.removeItem('accessToken');
     }
   };
 
